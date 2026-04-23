@@ -1,0 +1,14 @@
+node_modules/
+dist/
+.DS_Store
+*.log
+.vite/
+coverage/
+src/data/market.generated.ts
+instructivo/_preview.html
+playwright-report/
+test-results/
+.env
+.env.*
+.claude/
+

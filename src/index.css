@@ -1,0 +1,68 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-mercantil-mist text-mercantil-ink font-sans antialiased;
+    @apply dark:bg-mercantil-dark-bg dark:text-mercantil-dark-ink;
+    font-feature-settings: 'cv11', 'ss01';
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    @apply text-mercantil-navy font-semibold tracking-tight;
+    @apply dark:text-mercantil-dark-navy-text;
+  }
+
+  /* Scrollbar más sutil en dark (webkit) */
+  html.dark ::-webkit-scrollbar {
+    width: 12px;
+    height: 12px;
+  }
+  html.dark ::-webkit-scrollbar-track {
+    background: #0A1025;
+  }
+  html.dark ::-webkit-scrollbar-thumb {
+    background: #27325A;
+    border-radius: 6px;
+  }
+  html.dark ::-webkit-scrollbar-thumb:hover {
+    background: #3B4875;
+  }
+}
+
+@layer components {
+  .mp-card {
+    @apply bg-white rounded-card shadow-card border border-mercantil-line;
+    @apply dark:bg-mercantil-dark-panel dark:border-mercantil-dark-line dark:shadow-none;
+  }
+
+  .mp-btn-primary {
+    @apply inline-flex items-center justify-center rounded-full bg-mercantil-navy px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-mercantil-navy-deep focus:outline-none focus:ring-2 focus:ring-mercantil-orange focus:ring-offset-2 focus:ring-offset-white disabled:cursor-not-allowed disabled:opacity-50;
+    @apply dark:bg-mercantil-navy-soft dark:hover:bg-mercantil-navy dark:focus:ring-offset-mercantil-dark-bg;
+  }
+
+  .mp-btn-outline {
+    @apply inline-flex items-center justify-center rounded-full border border-mercantil-navy px-5 py-2.5 text-sm font-semibold text-mercantil-navy transition hover:bg-mercantil-navy hover:text-white focus:outline-none focus:ring-2 focus:ring-mercantil-orange focus:ring-offset-2 focus:ring-offset-white;
+    @apply dark:border-mercantil-gold-soft dark:text-mercantil-gold-soft dark:hover:bg-mercantil-gold-soft dark:hover:text-mercantil-dark-bg dark:focus:ring-offset-mercantil-dark-bg;
+  }
+
+  .mp-chip {
+    @apply inline-flex items-center gap-1 rounded-full border border-mercantil-line bg-white px-3 py-1 text-xs font-medium text-mercantil-slate transition hover:border-mercantil-orange hover:text-mercantil-orange;
+    @apply dark:border-mercantil-dark-line dark:bg-mercantil-dark-panel dark:text-mercantil-dark-slate dark:hover:text-mercantil-orange;
+  }
+
+  .mp-chip-active {
+    @apply border-mercantil-orange bg-mercantil-orange/10 text-mercantil-orange;
+    @apply dark:bg-mercantil-orange/20;
+  }
+}
