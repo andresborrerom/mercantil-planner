@@ -2091,3 +2091,30 @@ Corporate rename. Scope del reemplazo en `mercantil-planner/`:
 - 257/257 tests, build limpio, pipeline CI/CD automatizado.
 - Todos los lugares visibles de "Mercantil SFI" renombrados a "Mercantil AWM" en el planner y en el perfil compartido; 3 menciones históricas preservadas en la bitácora.
 
+---
+
+## 2026-04-23 — Reconciliación de bitácora: Visualización condicional v2 YA está implementada
+
+Auditoría de estado post-deploy. El backlog decía "Visualización condicional v2 (switch Toggle/Overlay + Y-axis union) — pendiente implementar" pero una inspección directa de `src/components/FanChart.tsx` confirma que los 4 criterios de aceptación definidos en la entrada del 2026-04-21 **están implementados**:
+
+1. **Switch UI Toggle ↔ Overlay** — `DisplayMode = 'overlay' | 'toggle'` con sub-switch `ToggleShown = 'base' | 'cond'`. `SegmentedControl` reutilizable renderiza ambos controles (líneas 245-266). Default `overlay`.
+2. **Toggle mode rendering** — bloque `{showCond && displayMode === 'toggle' && (...)}` (líneas 371-410) dibuja dos `Area` (condABand, condBBand) + dos `Line` de mediana condicional con fill 20% opacity y medianas sólidas, mismo look que base.
+3. **Y-axis en `union(base, cond)`** — `yDomain` memo (líneas 165-184) itera sobre `aP10/bP10/aP90/bP90/net` **y** sobre `condAP10/condBP10/condAP90/condBP90` cuando están disponibles. Comentario en el código referencia explícitamente "Fase C.2c v2 (2026-04-21)".
+4. **Tooltip condicional por modo** — `FanTooltip` recibe props `showBase` + `showCond` (líneas 301-307) y renderiza condicionalmente las rows base / cond.
+
+Entradas `Point` type extendidas con `condABand`, `condBBand` (además de las `condAP10..condBP90` previas de v1) — el dato está en el shape completo.
+
+### Interpretación
+
+La entrada del 2026-04-21 registraba que la sesión anterior se cortó con API errors antes de poder implementar. Probablemente la implementación ocurrió en una sesión posterior no registrada explícitamente, o el log se perdió. En todo caso, el deploy actual (commit `91a26d6` en `main`, desplegado a andresborrerom.github.io/mercantil-planner/) ya contiene v2.
+
+### Acción
+
+- Backlog actualizado: ítem "Visualización condicional v2" **removido** (está cerrado).
+- No requiere cambios de código — solo esta entrada de reconciliación para que el bitácora refleje la realidad.
+- Tests 257/257 siguen verdes — no se tocó nada.
+
+### Lección
+
+Conviene revisar el código antes de asumir que el backlog está al día. El bitácora es append-only (bueno para historia) pero se puede des-sincronizar si una sesión se cae antes de loggearse. Una auditoría rápida código vs backlog tras reanudar trabajo detecta estas discrepancias.
+
