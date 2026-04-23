@@ -46,7 +46,7 @@ const MIN_MONTHS = 240;
 
 /**
  * Mapeo de proxies para imputar el prefijo NaN de ETFs lanzados después de
- * 2006-01. Decidido con el usuario (Head of Quant Research de Mercantil SFI)
+ * 2006-01. Decidido con el usuario (Head of Quant Research de Mercantil AWM)
  * el 2026-04-15. El proxy se copia mes a mes para el prefijo faltante.
  * Todos los proxies están completos en el histórico.
  *

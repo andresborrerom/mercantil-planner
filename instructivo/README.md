@@ -1,6 +1,6 @@
 # Instructivo del Planificador Patrimonial — fuente Markdown
 
-Carpeta de trabajo para el **instructivo comercial en PDF** del Planificador Patrimonial de Mercantil SFI. Los archivos `.md` de esta carpeta son la fuente de contenido; el PDF final se genera con Pandoc (ver sección de build al final).
+Carpeta de trabajo para el **instructivo comercial en PDF** del Planificador Patrimonial de Mercantil AWM. Los archivos `.md` de esta carpeta son la fuente de contenido; el PDF final se genera con Pandoc (ver sección de build al final).
 
 ## Audiencia y contexto de uso
 

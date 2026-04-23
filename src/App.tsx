@@ -27,7 +27,7 @@ function App() {
         <section className="bg-gradient-to-br from-mercantil-navy via-mercantil-navy to-mercantil-navy-soft text-white">
           <div className="mx-auto max-w-7xl px-6 py-10">
             <p className="text-[11px] uppercase tracking-[0.18em] text-mercantil-gold-soft">
-              Mercantil SFI · Quantitative Research
+              Mercantil AWM · Quantitative Research
             </p>
             <h1 className="mt-1 text-3xl md:text-4xl font-semibold text-white">
               Planificador patrimonial
@@ -97,7 +97,7 @@ function App() {
       <footer className="border-t border-mercantil-line bg-white dark:bg-mercantil-dark-panel dark:border-mercantil-dark-line">
         <div className="mx-auto max-w-7xl px-6 py-5 text-xs text-mercantil-slate dark:text-mercantil-dark-slate flex items-center justify-between">
           <span>
-            Mercantil SFI · Herramienta interna · © {new Date().getFullYear()}
+            Mercantil AWM · Herramienta interna · © {new Date().getFullYear()}
           </span>
           <span className="text-mercantil-slate/70 dark:text-mercantil-dark-slate/70">
             Fase 2 · Block bootstrap 2006–2026 + RF yield-path

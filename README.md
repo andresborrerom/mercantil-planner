@@ -1,6 +1,6 @@
 # Mercantil Planner
 
-Subproyecto de **Mercantil SFI — Quantitative Research**. Herramienta
+Subproyecto de **Mercantil AWM — Quantitative Research**. Herramienta
 interactiva in-browser (offline, sin Python) para simular el camino
 patrimonial de un cliente invertido en dos portafolios en paralelo, con
 flujos configurables a lo largo de hasta 30 años.
@@ -13,7 +13,7 @@ flujos configurables a lo largo de hasta 30 años.
 - **Bitácora:** [`progreso-planner.md`](./progreso-planner.md) — hitos,
   decisiones, pendientes. Agregar al final, no sobrescribir.
 - **Perfil del usuario:** [`../about-me.md`](../about-me.md) (compartido entre
-  todos los proyectos de Mercantil SFI).
+  todos los proyectos de Mercantil AWM).
 
 ## Comandos
 

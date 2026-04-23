@@ -81,4 +81,4 @@ Si encontrás algo que claramente anda mal — la herramienta cuelga, arroja un 
 4. **Captura de pantalla** del error o del comportamiento extraño.
 5. Si hay mensaje de error en la consola del browser (F12), copiá el texto del error.
 
-**Pocho — Head of Quantitative Research, Mercantil SFI.**
+**Pocho — Head of Quantitative Research, Mercantil AWM.**

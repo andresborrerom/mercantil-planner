@@ -2025,3 +2025,69 @@ Mismo día. Mientras la decisión de visualización condicional queda en backlog
 - Build pendiente de confirmar.
 - Distribución `../mercantil-planner-build/` no sincronizada — el usuario decide.
 
+---
+
+## 2026-04-23 — Deploy en GitHub Pages + rename corporativo Mercantil SFI → Mercantil AWM
+
+Sesión de infraestructura. Dos bloques independientes: (1) setup de deploy remoto para que la herramienta sea accesible desde cualquier PC/tablet, (2) rename del nombre corporativo de la firma (SFI → AWM) en todo el código y docs.
+
+### Bloque 1 — Setup de GitHub + GitHub Pages
+
+Decisión del usuario: **repo público + GitHub Pages** (no privado con auth). Razón: es una versión de pruebas; eventualmente se migrará a un repo privado bajo organización Mercantil AWM. Los colegas acceden con URL sin cuenta de GitHub.
+
+**Cambios locales (Fase 1, hechos por Claude):**
+
+- **3 CSVs movidos a `mercantil-planner/data/`** — solo los 3 que el planner necesita (`mercantil_retornos_backfilled.csv`, `mercantil_yields_mensuales.csv`, `mercantil_rf_decomposed.csv`, ~220 KB total). El resto de `../mercantil_datos/` (5 MB, pertenece al proyecto de Benchmark y al optimizador) NO se mueve al repo del planner.
+- **`scripts/build-data.mjs`** → `DATA_DIR` actualizado de `'../../mercantil_datos'` a `'../data'`. Comentarios actualizados.
+- **`vite.config.ts`** → agregado `base: '/mercantil-planner/'` para que los assets carguen bajo el subpath de GitHub Pages.
+- **`.gitignore`** extendido: `playwright-report/`, `test-results/`, `.env*`, `.claude/`.
+- **`.github/workflows/deploy.yml`** creado: push a main → checkout → Node 20 → `npm ci` → `npm run build` → upload artifact → `actions/deploy-pages@v4`.
+- **`git init -b main`** + primer commit `d7cb167` con 84 archivos.
+- Verificación local: 257/257 tests, build limpio 1m11s, assets con prefijo correcto `/mercantil-planner/...`.
+
+**Fase 2 (hecha por el usuario):**
+
+- Creó repo público `github.com/andresborrerom/mercantil-planner`.
+- `git remote add origin ...` + `git push -u origin main`.
+- Settings → Pages → Source: GitHub Actions.
+
+**Resultado:**
+
+- Workflow run #1 exitoso (conclusion=success).
+- URL viva: **https://andresborrerom.github.io/mercantil-planner/** (HTTP 200, JS 1,069 KB + CSS 32 KB, mismos tamaños que el build local).
+- A partir de ahora, cada push a `main` redeploya automáticamente en ~2-3 min.
+
+### Bloque 2 — Rename Mercantil SFI → Mercantil AWM
+
+Corporate rename. Scope del reemplazo en `mercantil-planner/`:
+
+- `index.html` (title tag, visible en la pestaña del browser).
+- `src/App.tsx` (header "Mercantil AWM · Quantitative Research" y footer "Mercantil AWM · Herramienta interna").
+- `README.md` (2 menciones).
+- `scripts/build-data.mjs` (comentario sobre la decisión del usuario).
+- `instructivo/README.md` y `instructivo/parte-7-troubleshooting.md`.
+- `../about-me.md` en la raíz (4 menciones).
+
+**Falsos positivos NO tocados** (grep matchea "SFI" como substring):
+
+- `SFIN` (código del AMC "Sector Financials") en `src/domain/amc-definitions.ts`, `src/domain/types.ts` y `INSTRUCCIONES-PLANNER.md §AMCs`.
+
+**Entradas anteriores de esta bitácora NO tocadas** — descripciones históricas de lo que decía el código al momento de la entrada (ejemplo: la entrada original del título "Mercantil SFI · Planificador patrimonial" se conserva como registro de qué decía entonces).
+
+### Pendientes actualizados
+
+1. **Re-sincronizar `mercantil-planner-build/`** (distribución local hermana) o deprecarla — ahora hay URL pública compartible, el caso de uso de la distribución local puede ya no aplicar.
+2. **Visualización condicional v2** (switch Toggle/Overlay + Y-axis union) — sigue en backlog.
+3. **Fase C.2b UI** (tab "Escenario combinado" con AND/OR).
+4. **Fase C.3 — Regímenes históricos** (2008/2020/2022-like).
+5. **Modo `synchronizedDirection`** para estanflación real.
+6. **Audit UX móvil** — ya acordado como trabajo posterior a tener la versión laptop/tablet completa.
+7. **Instructivo partes 2/3/4b** — siguen pendientes (requieren screenshots).
+8. **Migración a repo privado bajo organización Mercantil AWM** — cuando el usuario decida.
+
+### Estado al cierre
+
+- Deploy en producción a través de GitHub Pages funcionando.
+- 257/257 tests, build limpio, pipeline CI/CD automatizado.
+- Todos los lugares visibles de "Mercantil SFI" renombrados a "Mercantil AWM" en el planner y en el perfil compartido; 3 menciones históricas preservadas en la bitácora.
+
