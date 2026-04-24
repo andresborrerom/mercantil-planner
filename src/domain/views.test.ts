@@ -17,6 +17,7 @@ import {
   asymmetricAnalysis,
   BUILT_IN_VIEWS,
   BUILT_IN_COMPOSITE_VIEWS,
+  BUILT_IN_SYNCHRONIZED_VIEWS,
   componentWindowEnvelope,
   findAnyBuiltInView,
   getAnyBuiltInView,
@@ -1941,6 +1942,187 @@ describe('views — composite multi-window (C.2b)', () => {
     // Path 0 solo satisface componente 1 (rates up). Path 1 solo el 2 (equity down).
     // AND → ningún path matchea.
     expect(ev.nMatched).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fase C.4 — SynchronizedView: co-movimiento mes a mes
+// ---------------------------------------------------------------------------
+
+describe('views — SynchronizedView (Fase C.4)', () => {
+  it('matchea solo paths con ≥ minMonths meses sincronizados', () => {
+    // 4 paths × 12 meses. Sincronización "estanflación": retorno A < 0 AND Δ TNX > 0.
+    // - Path 0: en meses 1,2,3 ambos cumplen (sincronizados) → 3 meses.
+    // - Path 1: en meses 1,2 ambos cumplen, mes 3 solo retorno (Δ yield = 0) → 2 meses.
+    // - Path 2: retorno negativo todo el año pero yield constante → 0 meses.
+    // - Path 3: yield sube pero retorno positivo → 0 meses.
+    const dataset = makeSyntheticDataset({
+      nPaths: 4,
+      horizonMonths: 12,
+      returnsA: (p, t) => {
+        if (p === 0) return t < 3 ? -0.02 : 0;
+        if (p === 1) return t < 3 ? -0.02 : 0;
+        if (p === 2) return -0.02;
+        return 0.02; // p === 3
+      },
+      yieldTNX: (p, t) => {
+        if (p === 0) {
+          // yield inicial 0.03. Para t=0,1,2 sube 0.001 mensual → yields 0.031, 0.032, 0.033.
+          // Δ al mes 1=0.001, mes 2=0.001, mes 3=0.001. Luego constante.
+          return t < 3 ? 0.03 + 0.001 * (t + 1) : 0.033;
+        }
+        if (p === 1) {
+          // Δ sube 2 meses luego constante desde mes 3.
+          return t < 2 ? 0.03 + 0.001 * (t + 1) : 0.032;
+        }
+        return 0.03; // p === 2, 3 → constante
+      },
+      yieldInitial: { IRX: 0.03, FVX: 0.03, TNX: 0.03, TYX: 0.03 },
+    });
+    const view = {
+      kind: 'synchronized' as const,
+      id: 'sync-test-3m',
+      label: 't', description: '',
+      components: [
+        { subject: { kind: 'portfolioReturn' as const, portfolio: 'A' as const }, direction: 'negative' as const },
+        { subject: { kind: 'yield' as const, key: 'TNX' as const }, direction: 'positive' as const },
+      ],
+      minMonths: 3,
+      window: { startMonth: 1, endMonth: 12 },
+    };
+    const ev = evaluateView(view, dataset);
+    // Solo path 0 tiene ≥ 3 meses sincronizados.
+    expect(ev.nMatched).toBe(1);
+    expect(Array.from(ev.matchedIndices)).toEqual([0]);
+  });
+
+  it('minMonths=1 → equivale a "al menos un mes sincronizado"', () => {
+    const dataset = makeSyntheticDataset({
+      nPaths: 3,
+      horizonMonths: 6,
+      returnsA: (p, t) => (p === 0 && t === 2 ? -0.02 : 0),
+      yieldTNX: (p, t) => {
+        // Path 0: Δ>0 solo en mes 3 (t=2 en 0-indexado) → yields[0..5] = 0.03,0.03,0.031,0.031,0.031,0.031
+        if (p === 0 && t >= 2) return 0.031;
+        return 0.03;
+      },
+      yieldInitial: { IRX: 0.03, FVX: 0.03, TNX: 0.03, TYX: 0.03 },
+    });
+    const view = {
+      kind: 'synchronized' as const,
+      id: 'sync-1m',
+      label: 't', description: '',
+      components: [
+        { subject: { kind: 'portfolioReturn' as const, portfolio: 'A' as const }, direction: 'negative' as const },
+        { subject: { kind: 'yield' as const, key: 'TNX' as const }, direction: 'positive' as const },
+      ],
+      minMonths: 1,
+      window: { startMonth: 1, endMonth: 6 },
+    };
+    const ev = evaluateView(view, dataset);
+    expect(ev.nMatched).toBe(1); // solo path 0
+  });
+
+  it('threshold > 0 filtra meses con magnitud insuficiente', () => {
+    // 2 paths × 6 meses. Retornos ambos negativos pero de distinta magnitud.
+    const dataset = makeSyntheticDataset({
+      nPaths: 2,
+      horizonMonths: 6,
+      returnsA: (p) => (p === 0 ? -0.02 : -0.001),
+    });
+    const view = {
+      kind: 'synchronized' as const,
+      id: 'sync-threshold',
+      label: 't', description: '',
+      components: [
+        {
+          subject: { kind: 'portfolioReturn' as const, portfolio: 'A' as const },
+          direction: 'negative' as const,
+          thresholdMagnitude: 0.01, // requiere r_t < -1%
+        },
+      ],
+      minMonths: 3,
+      window: { startMonth: 1, endMonth: 6 },
+    };
+    const ev = evaluateView(view, dataset);
+    // Path 0 cumple (r = -2%); path 1 no (r = -0.1%).
+    expect(ev.nMatched).toBe(1);
+    expect(Array.from(ev.matchedIndices)).toEqual([0]);
+  });
+
+  it('error si minMonths > largo de la ventana', () => {
+    const dataset = makeSyntheticDataset({ nPaths: 2, horizonMonths: 12 });
+    const view = {
+      kind: 'synchronized' as const,
+      id: 'sync-bad',
+      label: 't', description: '',
+      components: [
+        { subject: { kind: 'portfolioReturn' as const, portfolio: 'A' as const }, direction: 'negative' as const },
+      ],
+      minMonths: 13, // window [1,12] → largo 12
+      window: { startMonth: 1, endMonth: 12 },
+    };
+    expect(() => evaluateView(view, dataset)).toThrow(/minMonths/);
+  });
+
+  it('error si yield component sin yieldPaths en dataset', () => {
+    // Path con retornos negativos todo el período → el componente portfolioReturn
+    // direction=negative siempre pasa, lo que obliga a evaluar el yield component
+    // (que debe tirar error por yieldPaths null).
+    const dataset = makeSyntheticDataset({
+      nPaths: 1,
+      horizonMonths: 6,
+      returnsA: () => -0.01,
+    });
+    const mutated: ViewDataset = { ...dataset, yieldPaths: null };
+    const view = {
+      kind: 'synchronized' as const,
+      id: 'sync-no-yields',
+      label: 't', description: '',
+      components: [
+        { subject: { kind: 'portfolioReturn' as const, portfolio: 'A' as const }, direction: 'negative' as const },
+        { subject: { kind: 'yield' as const, key: 'TNX' as const }, direction: 'positive' as const },
+      ],
+      minMonths: 1,
+      window: { startMonth: 1, endMonth: 6 },
+    };
+    expect(() => evaluateView(view, mutated)).toThrow(/yieldPaths/);
+  });
+
+  it('BUILT_IN_SYNCHRONIZED_VIEWS contiene el preset estanflación y lo encuentra findAnyBuiltInView', () => {
+    expect(BUILT_IN_SYNCHRONIZED_VIEWS.length).toBeGreaterThanOrEqual(1);
+    const preset = findAnyBuiltInView('sync-stagflation-3m-12m');
+    expect(preset).not.toBeNull();
+    expect(preset!.id).toBe('sync-stagflation-3m-12m');
+    // También lo encuentra getAnyBuiltInView (throw si no existe).
+    expect(() => getAnyBuiltInView('sync-stagflation-3m-12m')).not.toThrow();
+  });
+
+  it('viewRequiresYieldPaths/EtfReturns detectan correctamente componentes sync', () => {
+    const viewWithYield = {
+      kind: 'synchronized' as const,
+      id: 'x', label: 'x', description: '',
+      components: [
+        { subject: { kind: 'yield' as const, key: 'TNX' as const }, direction: 'positive' as const },
+      ],
+      minMonths: 1,
+      window: { startMonth: 1, endMonth: 12 },
+    };
+    expect(viewRequiresYieldPaths(viewWithYield)).toBe(true);
+    expect(viewRequiresEtfReturns(viewWithYield)).toBe(false);
+
+    const viewWithEtf = {
+      kind: 'synchronized' as const,
+      id: 'y', label: 'y', description: '',
+      components: [
+        { subject: { kind: 'etfReturn' as const, ticker: 'SPY' as const }, direction: 'negative' as const },
+      ],
+      minMonths: 1,
+      window: { startMonth: 1, endMonth: 12 },
+    };
+    expect(viewRequiresEtfReturns(viewWithEtf)).toBe(true);
+    expect(viewRequiresYieldPaths(viewWithEtf)).toBe(false);
+    expect(requiredEtfTickers(viewWithEtf)).toEqual(['SPY']);
   });
 });
 

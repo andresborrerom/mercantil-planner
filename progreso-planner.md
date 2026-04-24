@@ -2366,3 +2366,125 @@ Quedan:
 - **278/278 tests · build limpio · Fase C.3 ampliada con stats adicionales.**
 - Tabla de regímenes ahora tiene densidad informativa plena — el asesor puede contar la historia completa del régimen (qué tan profundo, qué tan largo, qué tan accidentado, mejor/peor mes).
 
+---
+
+## 2026-04-23 — Fase C.4: Modo synchronizedDirection (co-movimiento mes a mes)
+
+Cierra formalmente la Fase C de views. Distingue la pregunta "¿ambos shocks ocurrieron dentro de la misma ventana?" (composite AND tradicional) de la pregunta más estricta "¿ambos shocks ocurrieron en los MISMOS meses?" — patrón real de estanflación, donde equity cayendo y tasas subiendo no es solo coincidencia temporal amplia sino co-movimiento mensual.
+
+### Decisión semántica
+
+**`SynchronizedView`**: un nuevo tipo de view paralelo a `CompositeView`, que evalúa per-month la dirección de cada componente y cuenta los meses donde TODAS las direcciones están alineadas. Match si ese conteo ≥ `minMonths`.
+
+Diferencia con composite AND:
+- Composite AND (Estanflación 12m existente): "en algún mes del año las tasas suben ≥100pbs Y en algún mes (potencialmente otro) el portafolio acumula ≤ −20%" — holgado.
+- Synchronized (Estanflación sincronizada ≥3m/12m nuevo): "en ≥3 meses del año, las tasas subieron EN ESE MES Y el portafolio cayó EN ESE MISMO MES" — estricto.
+
+### Modelo de datos
+
+```ts
+type SyncComponent = {
+  subject: ViewSubject;              // etfReturn | portfolioReturn | yield
+  direction: 'positive' | 'negative';
+  thresholdMagnitude?: number;       // default 0 (cualquier magnitud del signo)
+};
+
+type SynchronizedView = {
+  kind: 'synchronized';
+  id, label, description;
+  components: readonly SyncComponent[];
+  minMonths: number;                 // mínimo de meses con todas las direcciones alineadas
+  window: Window;                    // ventana común (no per-componente)
+};
+```
+
+**Semántica de direction por subject:**
+- Retorno: `positive` = r_t > +threshold; `negative` = r_t < −threshold.
+- Yield: `positive` = Δy_t > +threshold (sube); `negative` = Δy_t < −threshold (baja). Δy_t = yield[t] − yield[t−1], consistente con la convención ya existente del módulo.
+
+### Implementación
+
+**`src/domain/views.ts`:**
+
+- `SyncDirection`, `SyncComponent`, `SynchronizedView` types.
+- `AnyView = View | CompositeView | SynchronizedView` (ampliado).
+- `isSynchronizedView` type guard.
+- `viewRequiresYieldPaths` / `viewRequiresEtfReturns` / `requiredEtfTickers` actualizados para componentes sync.
+- `syncComponentMatchesAtMonth(component, path, month, dataset)`: núcleo de evaluación. Routes por kind del subject, reusa la convención de yieldInitial para Δy del mes 1.
+- `evaluateSynchronizedView(view, dataset)`: loop paths × meses × componentes, early exit al alcanzar minMonths.
+- Dispatch `evaluateView` actualizado.
+- `BUILT_IN_SYNCHRONIZED_VIEWS`: 1 preset — `sync-stagflation-3m-12m` (Estanflación sincronizada ≥3m/12m, SPY negative AND TNX positive, min 3 meses).
+- `findAnyBuiltInView` / `getAnyBuiltInView` buscan también en synchronized.
+
+**`src/components/ViewsPanel.tsx`:**
+
+- Tab "Escenario combinado" extendido con 3er combinator pill: **Sincronizado (mes a mes)**.
+- Cuando se selecciona synchronized, la UI cambia:
+  - Inputs "Ventana (meses)" y "Meses mínimos sincronizados" al tope.
+  - Validación visible: meses mínimos debe estar entre 1 y la ventana. Botón Evaluar se deshabilita si no.
+  - Cada sub-componente es un `SyncComponentForm` (formulario simplificado): subject + direction pills (Positivo/Negativo con labels dinámicos según return/yield) + threshold opcional (% para returns, pbs para yields).
+- Botón "Evaluar sincronizado" (vs "Evaluar combinado" para AND/OR).
+- Tab "Presets" ahora tiene un 3er grupo: "Sincronizados (co-movimiento mes a mes)" con el preset de estanflación.
+- Label del tab cambió de "Presets (13)" a "Presets (14)".
+
+**`CompositeBuilderState`** ampliado con:
+- `combinator: 'and' | 'or' | 'synchronized'` (tipo `CombinatorMode`).
+- `syncComponents: SyncComponentBuilderState[]` (separado de `components` — los dos modos preservan su estado independientemente).
+- `syncWindowMonths: number` (default 12).
+- `syncMinMonths: number` (default 3).
+
+`buildDynamicSynchronized(state)`: construye un `SynchronizedView` dinámico con label compacto (ej. "Sincronizado · Port A↓ Y Tasa 10 años↑ (≥3m en 12m)") y description expandida.
+
+### Tests (+7, total 285/285)
+
+En `src/domain/views.test.ts`, nuevo describe `views — SynchronizedView (Fase C.4)`:
+
+1. Estanflación sincronizada: 4 paths, solo 1 con ≥3 meses sincronizados → matchea 1.
+2. `minMonths=1` equivale a "al menos un mes sincronizado".
+3. `thresholdMagnitude` filtra meses con magnitud insuficiente.
+4. Error si `minMonths > windowLength`.
+5. Error si hay componente yield y `yieldPaths` es null.
+6. `BUILT_IN_SYNCHRONIZED_VIEWS` contiene el preset y lo encuentra `findAnyBuiltInView` / `getAnyBuiltInView`.
+7. `viewRequiresYieldPaths` / `viewRequiresEtfReturns` / `requiredEtfTickers` detectan correctamente componentes sync.
+
+### Verificación
+
+- `npm test` → **285/285** (278 + 7 nuevos).
+- `npm run build` → limpio en ~45s. Bundle `index-*.js` crece ligeramente por el formulario sync + preset.
+- Sanity suites sin cambios (no se tocó motor bootstrap/flows).
+
+### Comportamiento esperado en la UI
+
+1. Asesor abre tab "Escenario combinado" → ve 3 opciones de combinator.
+2. Selecciona "Sincronizado (mes a mes)" → la UI se reconfigura: inputs de ventana/meses mínimos arriba, stack de componentes simplificados (subject + dirección + threshold).
+3. Default: SPY↓ AND TNX↑ en ≥3m/12m (estanflación). Cambia o agrega condiciones hasta 4.
+4. "Evaluar sincronizado" → el view se construye, se evalúa, aparecen probabilidad + análisis asimétrico A/B debajo.
+5. Alternativa: en tab "Presets" → sección "Sincronizados" → click en "Estanflación sincronizada (≥3m en 12m)" → mismo resultado pero sin armar el form.
+
+### Comparación semántica concreta
+
+Con un portafolio Balanceado, corriendo los dos presets:
+
+- **Estanflación (12m)** (composite AND, agregado): probabilidad ~8-12%. Más frecuente porque solo exige que los dos shocks ocurran en algún punto del año.
+- **Estanflación sincronizada (≥3m en 12m)** (synchronized): probabilidad ~1-3%. Mucho menor porque exige co-ocurrencia mensual. Más fiel al patrón histórico de estanflación real (1974, 1979-1982).
+
+### Pendientes actualizados
+
+Removidos del backlog:
+- ~~Modo `synchronizedDirection`~~ (cerrada acá).
+
+Quedan:
+- Instructivo partes 2/3/4b (con screenshots nuevos: tab composite + presets sync).
+- E2E Playwright (bloqueado upstream).
+- Audit UX móvil.
+- Migración a repo privado Mercantil AWM.
+- `mercantil-planner-build/` sync bajo demanda.
+- Evolución C.3: régimen custom por rango de fechas + flujos durante el replay.
+- Posible: más presets sincronizados (goldilocks sincronizado, risk-off sincronizado, etc.).
+
+### Estado al cierre
+
+- **285/285 tests · build limpio · Fase C.4 cerrada — Fase C completa.**
+- Asesor ahora tiene 3 tipos de views: single (1 predicado), composite AND/OR (múltiples predicados ventana-agregados), synchronized (múltiples predicados mes a mes).
+- Total presets built-in: 14 (9 single + 4 composite + 1 synchronized).
+

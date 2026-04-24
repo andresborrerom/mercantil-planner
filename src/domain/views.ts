@@ -191,31 +191,94 @@ export type CompositeView = {
   window: Window;
 };
 
-/** Unión discriminada de view single-predicate + composite. */
-export type AnyView = View | CompositeView;
+/**
+ * Dirección de un componente en un view sincronizado.
+ *   - 'positive': retornos > +threshold (rally) / yields Δ > +threshold (suben).
+ *   - 'negative': retornos < −threshold (caída) / yields Δ < −threshold (bajan).
+ */
+export type SyncDirection = 'positive' | 'negative';
+
+/**
+ * Un componente de un `SynchronizedView`. A diferencia de `View`, no tiene
+ * `mode` ni `window` propia — todos los componentes de un sincronizado
+ * comparten la ventana del view y aplican una condición **por mes** en vez
+ * de una condición agregada sobre la ventana.
+ */
+export type SyncComponent = {
+  subject: ViewSubject;
+  direction: SyncDirection;
+  /**
+   * Magnitud mínima absoluta del threshold (decimal). Default 0.
+   *   - Para subjects de retorno: |r_t| > threshold con el signo de `direction`.
+   *   - Para subjects de yield: |Δy_t| > threshold con el signo de `direction`.
+   * Ejemplo: `thresholdMagnitude: 0.005` y `direction: 'negative'` en un
+   * portfolioReturn → matchea meses donde r_t < −0.5%.
+   */
+  thresholdMagnitude?: number;
+};
+
+/**
+ * View sincronizado (Fase C.4) — captura co-movimiento **mes a mes**.
+ *
+ * Semántica: para cada path, contamos cuántos meses dentro de `window`
+ * cumplen simultáneamente las condiciones de TODOS los componentes en ese
+ * mismo mes. El view matchea si ese conteo ≥ `minMonths`.
+ *
+ * Caso canónico — estanflación real: SPY cayendo (return < 0) Y TNX subiendo
+ * (Δy > 0) en el mismo mes. Un composite AND tradicional solo verifica que
+ * ambas cosas ocurran en ALGÚN mes de la ventana (potencialmente distintos);
+ * un synchronized view exige co-ocurrencia mensual, que es el patrón real
+ * de estanflación.
+ *
+ * Constraints:
+ *   - `components.length >= 1` (típico ≥ 2; un componente solo es degenerado
+ *     pero sintácticamente válido).
+ *   - `minMonths >= 0`, entero. Si excede el largo de la ventana, throw.
+ *   - Ventana común (no per-componente) — el co-movimiento requiere alinear
+ *     la grilla temporal.
+ */
+export type SynchronizedView = {
+  kind: 'synchronized';
+  id: string;
+  label: string;
+  description: string;
+  components: readonly SyncComponent[];
+  /** Mínimo de meses distintos con todas las direcciones alineadas simultáneamente. */
+  minMonths: number;
+  window: Window;
+};
+
+/** Unión discriminada de view single-predicate + composite + synchronized. */
+export type AnyView = View | CompositeView | SynchronizedView;
 
 /** Type guard: distingue composite de single. */
 export function isCompositeView(view: AnyView): view is CompositeView {
   return (view as CompositeView).kind === 'composite';
 }
 
+/** Type guard: distingue synchronized de composite/single. */
+export function isSynchronizedView(view: AnyView): view is SynchronizedView {
+  return (view as SynchronizedView).kind === 'synchronized';
+}
+
 /**
- * True si el view (single o composite) requiere yield paths para evaluarse.
- * Un composite requiere yields si cualquiera de sus componentes los requiere.
+ * True si el view (single, composite o synchronized) requiere yield paths
+ * para evaluarse. Composite/synchronized requieren yields si cualquiera de
+ * sus componentes los requiere.
  */
 export function viewRequiresYieldPaths(view: AnyView): boolean {
-  if (isCompositeView(view)) {
+  if (isCompositeView(view) || isSynchronizedView(view)) {
     return view.components.some((c) => c.subject.kind === 'yield');
   }
   return view.subject.kind === 'yield';
 }
 
 /**
- * True si el view requiere retornos per-ETF. Un composite los requiere si al
- * menos un componente tiene subject `etfReturn`.
+ * True si el view requiere retornos per-ETF. Composite/synchronized los
+ * requieren si al menos un componente tiene subject `etfReturn`.
  */
 export function viewRequiresEtfReturns(view: AnyView): boolean {
-  if (isCompositeView(view)) {
+  if (isCompositeView(view) || isSynchronizedView(view)) {
     return view.components.some((c) => c.subject.kind === 'etfReturn');
   }
   return view.subject.kind === 'etfReturn';
@@ -228,9 +291,12 @@ export function viewRequiresEtfReturns(view: AnyView): boolean {
  */
 export function requiredEtfTickers(view: AnyView): readonly Ticker[] {
   const set = new Set<Ticker>();
-  const components = isCompositeView(view) ? view.components : [view];
-  for (const c of components) {
-    if (c.subject.kind === 'etfReturn') set.add(c.subject.ticker);
+  if (isCompositeView(view) || isSynchronizedView(view)) {
+    for (const c of view.components) {
+      if (c.subject.kind === 'etfReturn') set.add(c.subject.ticker);
+    }
+  } else if (view.subject.kind === 'etfReturn') {
+    set.add(view.subject.ticker);
   }
   return Array.from(set);
 }
@@ -717,15 +783,154 @@ function evaluateCompositeView(view: CompositeView, dataset: ViewDataset): ViewE
 }
 
 /**
- * Aplica un view (single o composite) al dataset simulado y devuelve el
- * conjunto de paths que lo cumplen, junto con la probabilidad empírica y su
- * error estándar.
+ * True si un componente sincronizado cumple su condición direccional en un
+ * mes específico (1-indexado). Throw si el dataset no tiene los datos
+ * requeridos (yieldPaths/etfReturns).
  *
- * Orden de complejidad: O(nPaths · windowLength) single, O(k · nPaths · windowLength)
- * composite; extra O(nPaths · log(nPaths)) si el modo es `percentileBandReturn`.
+ * Convención de Δy: el cambio en el mes t es y_at_end_of_t − y_at_end_of_(t−1),
+ * y para t=1 usamos y_at_end_of_1 − yieldInitial (consistente con
+ * `yieldAtStart` del resto del módulo).
+ */
+function syncComponentMatchesAtMonth(
+  component: SyncComponent,
+  pathIdx: number,
+  month: number, // 1-indexed
+  dataset: ViewDataset,
+): boolean {
+  const threshold = component.thresholdMagnitude ?? 0;
+  const H = dataset.horizonMonths;
+  const p = pathIdx;
+  const t = month;
+
+  if (component.subject.kind === 'yield') {
+    const yieldPaths = dataset.yieldPaths;
+    if (!yieldPaths) {
+      throw new Error(
+        'evaluateSynchronizedView: yieldPaths null pero un componente tiene subject.kind === "yield"',
+      );
+    }
+    const yieldArr = yieldPaths[component.subject.key];
+    const prev =
+      t === 1
+        ? dataset.yieldInitial[component.subject.key]
+        : yieldArr[p * H + (t - 2)];
+    const curr = yieldArr[p * H + (t - 1)];
+    const delta = curr - prev;
+    return component.direction === 'positive' ? delta > threshold : delta < -threshold;
+  }
+
+  if (component.subject.kind === 'portfolioReturn') {
+    const returns =
+      component.subject.portfolio === 'A'
+        ? dataset.portfolioReturnsA
+        : dataset.portfolioReturnsB;
+    const r = returns[p * H + (t - 1)];
+    return component.direction === 'positive' ? r > threshold : r < -threshold;
+  }
+
+  // etfReturn
+  const etfReturns = dataset.etfReturns;
+  if (!etfReturns) {
+    throw new Error(
+      'evaluateSynchronizedView: etfReturns null pero un componente tiene subject.kind === "etfReturn"',
+    );
+  }
+  const arr = etfReturns[component.subject.ticker];
+  if (!arr) {
+    throw new Error(
+      `evaluateSynchronizedView: ticker "${component.subject.ticker}" no está en etfReturns`,
+    );
+  }
+  const r = arr[p * H + (t - 1)];
+  return component.direction === 'positive' ? r > threshold : r < -threshold;
+}
+
+/**
+ * Evalúa un view sincronizado (Fase C.4). Para cada path, cuenta cuántos
+ * meses dentro de la ventana cumplen simultáneamente la dirección de
+ * TODOS los componentes. Match si count ≥ `view.minMonths`.
+ *
+ * Complejidad: O(nPaths · windowLength · k) donde k es # componentes.
+ *
+ * Validaciones:
+ *   - `components.length >= 1`.
+ *   - `minMonths` entero no-negativo.
+ *   - `minMonths` ≤ largo de la ventana (si no, imposible de satisfacer).
+ */
+function evaluateSynchronizedView(
+  view: SynchronizedView,
+  dataset: ViewDataset,
+): ViewEvaluation {
+  validateWindow(view.window, dataset.horizonMonths);
+  if (view.components.length === 0) {
+    throw new Error(
+      `evaluateSynchronizedView: view "${view.id}" no tiene componentes`,
+    );
+  }
+  if (!Number.isInteger(view.minMonths) || view.minMonths < 0) {
+    throw new Error(
+      `evaluateSynchronizedView: view "${view.id}" tiene minMonths inválido (${view.minMonths})`,
+    );
+  }
+  const windowLen = view.window.endMonth - view.window.startMonth + 1;
+  if (view.minMonths > windowLen) {
+    throw new Error(
+      `evaluateSynchronizedView: view "${view.id}" tiene minMonths (${view.minMonths}) mayor que el largo de la ventana (${windowLen})`,
+    );
+  }
+
+  const n = dataset.nPaths;
+  const matched: number[] = [];
+
+  for (let p = 0; p < n; p++) {
+    let syncCount = 0;
+    for (let m = view.window.startMonth; m <= view.window.endMonth; m++) {
+      let allMatch = true;
+      for (const c of view.components) {
+        if (!syncComponentMatchesAtMonth(c, p, m, dataset)) {
+          allMatch = false;
+          break;
+        }
+      }
+      if (allMatch) {
+        syncCount++;
+        // Early exit: si ya superamos el threshold, no necesitamos seguir contando.
+        if (syncCount >= view.minMonths) {
+          break;
+        }
+      }
+    }
+    if (syncCount >= view.minMonths) matched.push(p);
+  }
+
+  const nMatched = matched.length;
+  const probability = nMatched / n;
+  const standardError = Math.sqrt((probability * (1 - probability)) / n);
+
+  return {
+    view,
+    nMatched,
+    nTotal: n,
+    probability,
+    standardError,
+    matchedIndices: Uint32Array.from(matched),
+  };
+}
+
+/**
+ * Aplica un view (single, composite o synchronized) al dataset simulado y
+ * devuelve el conjunto de paths que lo cumplen, junto con la probabilidad
+ * empírica y su error estándar.
+ *
+ * Complejidad:
+ *   - single: O(nPaths · windowLength).
+ *   - composite: O(k · nPaths · windowLength).
+ *   - synchronized: O(nPaths · windowLength · k) con early exit al alcanzar minMonths.
+ *   - extra O(nPaths · log(nPaths)) si el modo es `percentileBandReturn`.
  */
 export function evaluateView(view: AnyView, dataset: ViewDataset): ViewEvaluation {
   if (isCompositeView(view)) return evaluateCompositeView(view, dataset);
+  if (isSynchronizedView(view)) return evaluateSynchronizedView(view, dataset);
   return evaluateSingleView(view, dataset);
 }
 
@@ -1103,18 +1308,50 @@ export const BUILT_IN_COMPOSITE_VIEWS: readonly CompositeView[] = [
   },
 ] as const;
 
-/** Lookup unificado (single + composite). Throw si no existe en ninguno. */
+/**
+ * Presets sincronizados built-in (Fase C.4). Detectan co-movimiento mes a mes
+ * entre componentes. Complemento pedagógico de los presets composite AND/OR
+ * que solo exigen que los predicados se satisfagan en algún punto de la
+ * ventana (potencialmente distintos).
+ */
+export const BUILT_IN_SYNCHRONIZED_VIEWS: readonly SynchronizedView[] = [
+  {
+    kind: 'synchronized',
+    id: 'sync-stagflation-3m-12m',
+    label: 'Estanflación sincronizada (≥3m en 12m)',
+    description:
+      'En al menos 3 meses distintos del primer año, las tasas 10y suben (Δy > 0) en el mismo mes que el portafolio A cae (retorno < 0). Patrón real de estanflación mes a mes — más estricto que el composite AND tradicional, que solo pide que ambos shocks ocurran en algún punto de la ventana.',
+    components: [
+      {
+        subject: { kind: 'portfolioReturn', portfolio: 'A' },
+        direction: 'negative',
+      },
+      {
+        subject: { kind: 'yield', key: 'TNX' },
+        direction: 'positive',
+      },
+    ],
+    minMonths: 3,
+    window: COMPOSITE_WINDOW_12M,
+  },
+] as const;
+
+/** Lookup unificado (single + composite + synchronized). Throw si no existe. */
 export function getAnyBuiltInView(id: string): AnyView {
   const single = BUILT_IN_VIEWS.find((v) => v.id === id);
   if (single) return single;
   const comp = BUILT_IN_COMPOSITE_VIEWS.find((v) => v.id === id);
   if (comp) return comp;
+  const sync = BUILT_IN_SYNCHRONIZED_VIEWS.find((v) => v.id === id);
+  if (sync) return sync;
   throw new Error(`getAnyBuiltInView: no existe preset con id="${id}"`);
 }
 
-/** Lookup seguro. null si no existe en ninguno de los dos pools. */
+/** Lookup seguro. null si no existe en ninguno de los tres pools. */
 export function findAnyBuiltInView(id: string): AnyView | null {
   const single = BUILT_IN_VIEWS.find((v) => v.id === id);
   if (single) return single;
-  return BUILT_IN_COMPOSITE_VIEWS.find((v) => v.id === id) ?? null;
+  const comp = BUILT_IN_COMPOSITE_VIEWS.find((v) => v.id === id);
+  if (comp) return comp;
+  return BUILT_IN_SYNCHRONIZED_VIEWS.find((v) => v.id === id) ?? null;
 }

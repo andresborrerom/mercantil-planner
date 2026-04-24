@@ -33,12 +33,16 @@ import {
 import type { YieldKey } from '../domain/rf-config';
 import {
   BUILT_IN_COMPOSITE_VIEWS,
+  BUILT_IN_SYNCHRONIZED_VIEWS,
   BUILT_IN_VIEWS,
   viewRequiresEtfReturns,
   viewRequiresYieldPaths,
   type AsymmetricAnalysis,
   type CompositeView,
   type PredicateMode,
+  type SyncDirection,
+  type SynchronizedView,
+  type SyncComponent,
   type View,
   type ViewSubject,
 } from '../domain/views';
@@ -134,19 +138,64 @@ const DEFAULT_BUILDER: BuilderState = {
 
 // ---------------------------------------------------------------------------
 // Fase C.2b UI — estado del builder compuesto (2-4 componentes + AND/OR)
+// Fase C.4 UI — modo sincronizado coexiste en el mismo tab, con subState propio.
 // ---------------------------------------------------------------------------
 
+type CombinatorMode = 'and' | 'or' | 'synchronized';
+
+/**
+ * Estado de un componente del builder sincronizado. Más simple que
+ * `BuilderState` — no hay medida/filtro/horizonte porque la condición es
+ * direccional mes a mes y la ventana es común al view.
+ */
+type SyncComponentBuilderState = {
+  subjectKind: SubjectKind;
+  etfTicker: Ticker;
+  portfolio: 'A' | 'B';
+  yieldKey: YieldKey;
+  direction: SyncDirection;
+  /** Threshold opcional. Empty = 0. Interpretación: % para returns, pbs para yields. */
+  thresholdStr: string;
+};
+
 type CompositeBuilderState = {
-  combinator: 'and' | 'or';
+  combinator: CombinatorMode;
+  /** Componentes para modo AND/OR. Cada uno es un builder single completo. */
   components: BuilderState[];
+  /** Componentes para modo synchronized. Cada uno es direccional. */
+  syncComponents: SyncComponentBuilderState[];
+  /** Ventana común del view sincronizado (en meses desde mes 1). */
+  syncWindowMonths: number;
+  /** Mínimo de meses sincronizados requeridos. */
+  syncMinMonths: number;
 };
 
 const MAX_COMPOSITE_COMPONENTS = 4;
 const MIN_COMPOSITE_COMPONENTS = 2;
 
+const DEFAULT_SYNC_COMPONENT_1: SyncComponentBuilderState = {
+  subjectKind: 'portfolioReturn',
+  etfTicker: 'SPY',
+  portfolio: 'A',
+  yieldKey: 'TNX',
+  direction: 'negative',
+  thresholdStr: '',
+};
+const DEFAULT_SYNC_COMPONENT_2: SyncComponentBuilderState = {
+  subjectKind: 'yield',
+  etfTicker: 'SPY',
+  portfolio: 'A',
+  yieldKey: 'TNX',
+  direction: 'positive',
+  thresholdStr: '',
+};
+
 /**
  * Default pedagógico: equity shock + yield spike AND-combinados (estanflación
  * incipiente). El usuario puede ajustar ambos componentes libremente.
+ *
+ * Para el modo synchronized, el default es equivalente conceptualmente pero
+ * con co-movimiento mes a mes: SPY↓ Y TNX↑ en el MISMO mes, ≥3m en 12m.
  */
 const DEFAULT_COMPOSITE_BUILDER: CompositeBuilderState = {
   combinator: 'and',
@@ -162,6 +211,9 @@ const DEFAULT_COMPOSITE_BUILDER: CompositeBuilderState = {
       maxVal: '',
     },
   ],
+  syncComponents: [DEFAULT_SYNC_COMPONENT_1, DEFAULT_SYNC_COMPONENT_2],
+  syncWindowMonths: 12,
+  syncMinMonths: 3,
 };
 
 function buildSubject(state: BuilderState): ViewSubject {
@@ -324,6 +376,11 @@ function buildDynamicComposite(composite: CompositeBuilderState): CompositeView 
   if (composite.components.length === 0) {
     throw new Error('buildDynamicComposite: se requiere al menos 1 componente');
   }
+  if (composite.combinator !== 'and' && composite.combinator !== 'or') {
+    throw new Error(
+      `buildDynamicComposite: combinator "${composite.combinator}" no es and/or`,
+    );
+  }
   const components = composite.components.map(buildDynamicView);
   let startMonth = Infinity;
   let endMonth = -Infinity;
@@ -349,6 +406,84 @@ function buildDynamicComposite(composite: CompositeBuilderState): CompositeView 
     combinator: composite.combinator,
     components,
     window: { startMonth, endMonth },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Fase C.4 UI — constructor de SynchronizedView dinámico
+// ---------------------------------------------------------------------------
+
+const SYNC_YIELD_LABEL_MAP: Record<YieldKey, string> = {
+  IRX: 'Tasa 3 meses',
+  FVX: 'Tasa 5 años',
+  TNX: 'Tasa 10 años',
+  TYX: 'Tasa 30 años',
+};
+
+function buildSyncSubject(state: SyncComponentBuilderState): ViewSubject {
+  if (state.subjectKind === 'etfReturn') {
+    return { kind: 'etfReturn', ticker: state.etfTicker };
+  }
+  if (state.subjectKind === 'portfolioReturn') {
+    return { kind: 'portfolioReturn', portfolio: state.portfolio };
+  }
+  return { kind: 'yield', key: state.yieldKey };
+}
+
+function buildSyncComponent(state: SyncComponentBuilderState): SyncComponent {
+  const subject = buildSyncSubject(state);
+  const raw = state.thresholdStr.trim();
+  let thresholdMagnitude: number | undefined;
+  if (raw !== '') {
+    const n = Number(raw);
+    if (Number.isFinite(n) && n > 0) {
+      // Returns: valor en % → decimal. Yields: valor en pbs → decimal.
+      const isReturn =
+        state.subjectKind === 'etfReturn' || state.subjectKind === 'portfolioReturn';
+      thresholdMagnitude = isReturn ? n / 100 : n / 10000;
+    }
+  }
+  const comp: SyncComponent = {
+    subject,
+    direction: state.direction,
+  };
+  if (thresholdMagnitude !== undefined) comp.thresholdMagnitude = thresholdMagnitude;
+  return comp;
+}
+
+function syncComponentShortLabel(state: SyncComponentBuilderState): string {
+  const dir = state.direction === 'positive' ? '↑' : '↓';
+  if (state.subjectKind === 'etfReturn') return `${ETF_LABELS[state.etfTicker].short}${dir}`;
+  if (state.subjectKind === 'portfolioReturn') return `Port ${state.portfolio}${dir}`;
+  return `${SYNC_YIELD_LABEL_MAP[state.yieldKey]}${dir}`;
+}
+
+function buildDynamicSynchronized(composite: CompositeBuilderState): SynchronizedView {
+  if (composite.syncComponents.length === 0) {
+    throw new Error('buildDynamicSynchronized: se requiere al menos 1 componente');
+  }
+  const { syncMinMonths, syncWindowMonths } = composite;
+  const components = composite.syncComponents.map(buildSyncComponent);
+  const shortLabels = composite.syncComponents.map(syncComponentShortLabel);
+  const label = `Sincronizado · ${shortLabels.join(' Y ')} (≥${syncMinMonths}m en ${syncWindowMonths}m)`;
+  const description =
+    `En al menos ${syncMinMonths} mes${syncMinMonths === 1 ? '' : 'es'} distinto${syncMinMonths === 1 ? '' : 's'} ` +
+    `de la ventana de ${syncWindowMonths} meses, TODAS las condiciones se cumplen simultáneamente ` +
+    `en el mismo mes: ${shortLabels.join(' Y ')}.`;
+  const idParts = [
+    'dyn-sync',
+    `${composite.syncComponents.length}comp`,
+    `${syncMinMonths}of${syncWindowMonths}`,
+    Date.now().toString(36),
+  ];
+  return {
+    kind: 'synchronized',
+    id: idParts.join('-'),
+    label,
+    description,
+    components,
+    minMonths: syncMinMonths,
+    window: { startMonth: 1, endMonth: syncWindowMonths },
   };
 }
 
@@ -738,6 +873,201 @@ function SingleViewBuilderForm({
 }
 
 // ---------------------------------------------------------------------------
+// Sub-componente: formulario de un componente sincronizado (Fase C.4)
+// ---------------------------------------------------------------------------
+
+/**
+ * Formulario simplificado para un componente de un SynchronizedView.
+ * A diferencia de `SingleViewBuilderForm`, no hay medida/filtro/horizonte —
+ * solo subject + direction + threshold opcional. La ventana es común al
+ * view y vive en el parent.
+ */
+function SyncComponentForm({
+  state,
+  setState,
+  hasEtfReturns,
+  hasYieldPaths,
+  title,
+  onRemove,
+}: {
+  state: SyncComponentBuilderState;
+  setState: Dispatch<SetStateAction<SyncComponentBuilderState>>;
+  hasEtfReturns: boolean;
+  hasYieldPaths: boolean;
+  title?: string;
+  onRemove?: () => void;
+}) {
+  const etfGroups = useMemo(() => tickersByGroup(), []);
+
+  const update = useCallback(
+    <K extends keyof SyncComponentBuilderState>(
+      key: K,
+      value: SyncComponentBuilderState[K],
+    ) => setState((s) => ({ ...s, [key]: value })),
+    [setState],
+  );
+
+  const isReturn =
+    state.subjectKind === 'etfReturn' || state.subjectKind === 'portfolioReturn';
+  const units = isReturn ? '%' : 'pbs';
+
+  return (
+    <div className="space-y-3 rounded-md border border-mercantil-line/60 dark:border-mercantil-dark-line/60 bg-mercantil-mist/30 dark:bg-mercantil-dark-bg/30 p-3">
+      {title && (
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-semibold uppercase tracking-wider text-mercantil-navy dark:text-mercantil-dark-navy-text">
+            {title}
+          </span>
+          {onRemove && (
+            <button
+              type="button"
+              onClick={onRemove}
+              className="text-[10px] px-2 py-0.5 rounded border border-rose-300 dark:border-rose-800 text-rose-700 dark:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/40"
+            >
+              Eliminar
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Subject type */}
+      <div>
+        <div className="text-[10px] uppercase tracking-wider text-mercantil-slate dark:text-mercantil-dark-slate font-semibold mb-1.5">
+          Sobre qué
+        </div>
+        <div className="flex gap-2 flex-wrap">
+          {(
+            [
+              ['etfReturn', 'ETF individual', !hasEtfReturns],
+              ['portfolioReturn', 'Portafolio A/B', false],
+              ['yield', 'Yield de Treasury', !hasYieldPaths],
+            ] as [SubjectKind, string, boolean][]
+          ).map(([k, label, disabled]) => (
+            <button
+              key={k}
+              type="button"
+              onClick={() => update('subjectKind', k)}
+              disabled={disabled}
+              title={
+                disabled
+                  ? 'Tildá «Habilitar ETFs/yields» junto al botón Simular y volvé a correr Simular'
+                  : undefined
+              }
+              className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
+                state.subjectKind === k
+                  ? 'bg-mercantil-orange text-white border-mercantil-orange'
+                  : disabled
+                    ? 'bg-mercantil-line/50 text-mercantil-slate border-mercantil-line dark:bg-mercantil-dark-line/40 dark:text-mercantil-dark-slate dark:border-mercantil-dark-line cursor-not-allowed'
+                    : 'bg-white text-mercantil-navy border-mercantil-line hover:bg-mercantil-line/40 dark:bg-mercantil-dark-panel dark:text-mercantil-dark-navy-text dark:border-mercantil-dark-line dark:hover:bg-mercantil-dark-line/60'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <div className="mt-2">
+          {state.subjectKind === 'etfReturn' && (
+            <select
+              value={state.etfTicker}
+              onChange={(e) => update('etfTicker', e.target.value as Ticker)}
+              className="px-2 py-1.5 text-xs rounded border border-mercantil-line dark:border-mercantil-dark-line bg-white dark:bg-mercantil-dark-panel text-mercantil-ink dark:text-mercantil-dark-ink focus:ring-1 focus:ring-mercantil-orange focus:outline-none"
+            >
+              {GROUP_ORDER.map((group: EtfGroup) => (
+                <optgroup key={group} label={GROUP_LABELS[group]}>
+                  {etfGroups[group].map((t) => (
+                    <option key={t} value={t}>
+                      {ETF_LABELS[t].short} ({t})
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+          )}
+          {state.subjectKind === 'portfolioReturn' && (
+            <div className="flex gap-2">
+              {(['A', 'B'] as const).map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => update('portfolio', p)}
+                  className={`text-xs px-3 py-1.5 rounded border ${
+                    state.portfolio === p
+                      ? 'bg-mercantil-navy text-white border-mercantil-navy dark:bg-mercantil-dark-navy-text dark:text-mercantil-dark-bg dark:border-mercantil-dark-navy-text'
+                      : 'bg-white text-mercantil-navy border-mercantil-line dark:bg-mercantil-dark-panel dark:text-mercantil-dark-navy-text dark:border-mercantil-dark-line'
+                  }`}
+                >
+                  Portafolio {p}
+                </button>
+              ))}
+            </div>
+          )}
+          {state.subjectKind === 'yield' && (
+            <select
+              value={state.yieldKey}
+              onChange={(e) => update('yieldKey', e.target.value as YieldKey)}
+              className="px-2 py-1.5 text-xs rounded border border-mercantil-line dark:border-mercantil-dark-line bg-white dark:bg-mercantil-dark-panel text-mercantil-ink dark:text-mercantil-dark-ink focus:ring-1 focus:ring-mercantil-orange focus:outline-none"
+            >
+              {YIELD_OPTIONS.map((o) => (
+                <option key={o.key} value={o.key}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
+      </div>
+
+      {/* Direction + threshold */}
+      <div className="flex flex-wrap gap-3 items-end">
+        <div>
+          <div className="text-[10px] uppercase tracking-wider text-mercantil-slate dark:text-mercantil-dark-slate font-semibold mb-1.5">
+            Dirección (por mes)
+          </div>
+          <div className="flex gap-2">
+            {(
+              [
+                ['positive', isReturn ? 'Positivo (retorno > 0)' : 'Sube (Δy > 0)'],
+                ['negative', isReturn ? 'Negativo (retorno < 0)' : 'Baja (Δy < 0)'],
+              ] as [SyncDirection, string][]
+            ).map(([d, label]) => (
+              <button
+                key={d}
+                type="button"
+                onClick={() => update('direction', d)}
+                className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
+                  state.direction === d
+                    ? 'bg-mercantil-orange text-white border-mercantil-orange'
+                    : 'bg-white text-mercantil-navy border-mercantil-line hover:bg-mercantil-line/40 dark:bg-mercantil-dark-panel dark:text-mercantil-dark-navy-text dark:border-mercantil-dark-line dark:hover:bg-mercantil-dark-line/60'
+                }`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <label className="flex flex-col gap-0.5">
+          <span className="text-[10px] uppercase tracking-wider text-mercantil-slate dark:text-mercantil-dark-slate font-semibold">
+            Magnitud mínima ({units}) — opcional
+          </span>
+          <input
+            type="text"
+            value={state.thresholdStr}
+            onChange={(e) => update('thresholdStr', e.target.value)}
+            placeholder="0"
+            className="w-24 px-2 py-1.5 text-xs rounded border border-mercantil-line dark:border-mercantil-dark-line bg-white dark:bg-mercantil-dark-panel text-mercantil-ink dark:text-mercantil-dark-ink tabular-nums focus:ring-1 focus:ring-mercantil-orange focus:outline-none"
+          />
+        </label>
+        <p className="text-[10px] text-mercantil-slate dark:text-mercantil-dark-slate italic max-w-xs">
+          {isReturn
+            ? 'Retorno del mes con la dirección y magnitud indicadas.'
+            : 'Cambio mensual del yield (yield[t] − yield[t−1]) con la dirección y magnitud indicadas.'}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Sub-componente: tabla asimétrica de métricas A o B
 // ---------------------------------------------------------------------------
 
@@ -840,7 +1170,10 @@ export default function ViewsPanel() {
   }, [builder, setCustomView]);
 
   const runComposite = useCallback(() => {
-    const view = buildDynamicComposite(compBuilder);
+    const view =
+      compBuilder.combinator === 'synchronized'
+        ? buildDynamicSynchronized(compBuilder)
+        : buildDynamicComposite(compBuilder);
     setCustomView(view);
   }, [compBuilder, setCustomView]);
 
@@ -875,6 +1208,48 @@ export default function ViewsPanel() {
     [],
   );
 
+  // Handlers para el modo sincronizado
+  const addSyncComponent = useCallback(() => {
+    setCompBuilder((c) =>
+      c.syncComponents.length >= MAX_COMPOSITE_COMPONENTS
+        ? c
+        : {
+            ...c,
+            syncComponents: [...c.syncComponents, { ...DEFAULT_SYNC_COMPONENT_1 }],
+          },
+    );
+  }, []);
+
+  const removeSyncComponent = useCallback((idx: number) => {
+    setCompBuilder((c) =>
+      c.syncComponents.length <= MIN_COMPOSITE_COMPONENTS
+        ? c
+        : {
+            ...c,
+            syncComponents: c.syncComponents.filter((_, i) => i !== idx),
+          },
+    );
+  }, []);
+
+  const makeSyncComponentSetState = useCallback(
+    (idx: number): Dispatch<SetStateAction<SyncComponentBuilderState>> =>
+      (updater) =>
+        setCompBuilder((c) => ({
+          ...c,
+          syncComponents: c.syncComponents.map((comp, i) => {
+            if (i !== idx) return comp;
+            return typeof updater === 'function'
+              ? (updater as (s: SyncComponentBuilderState) => SyncComponentBuilderState)(comp)
+              : updater;
+          }),
+        })),
+    [],
+  );
+
+  const syncMinMonthsValid =
+    compBuilder.syncMinMonths >= 1 &&
+    compBuilder.syncMinMonths <= compBuilder.syncWindowMonths;
+
   const badge = confidenceBadge(nMatched);
 
   return (
@@ -907,7 +1282,7 @@ export default function ViewsPanel() {
                 {([
                   ['builder', 'Builder — single'],
                   ['composite', 'Escenario combinado'],
-                  ['preset', 'Presets (13)'],
+                  ['preset', 'Presets (14)'],
                 ] as [ActiveTab, string][]).map(([t, label]) => (
                   <button
                     key={t}
@@ -948,13 +1323,11 @@ export default function ViewsPanel() {
                 </div>
               )}
 
-              {/* ========== BUILDER COMPUESTO (Fase C.2b UI) ========== */}
+              {/* ========== BUILDER COMPUESTO (Fase C.2b UI + Fase C.4 sync) ========== */}
               {activeTab === 'composite' && (
                 <div className="rounded-lg border border-mercantil-line dark:border-mercantil-dark-line p-4 space-y-4">
                   <p className="text-xs text-mercantil-slate dark:text-mercantil-dark-slate">
-                    Combiná {MIN_COMPOSITE_COMPONENTS}–{MAX_COMPOSITE_COMPONENTS} condiciones con AND (todas se cumplen a la vez) u OR (al menos una).
-                    Cada condición puede tener su propia ventana temporal — útil para cruzar shocks en
-                    horizontes distintos (ej: "rally S&P 6m AND rally Eurozona 12m").
+                    Combiná {MIN_COMPOSITE_COMPONENTS}–{MAX_COMPOSITE_COMPONENTS} condiciones con AND (todas se cumplen a la vez, ventana-agregadas), OR (al menos una), o SINCRONIZADO (co-movimiento mes a mes dentro de la ventana).
                   </p>
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-[10px] uppercase tracking-wider text-mercantil-slate dark:text-mercantil-dark-slate font-semibold">
@@ -964,7 +1337,8 @@ export default function ViewsPanel() {
                       [
                         ['and', 'AND (todas)'],
                         ['or', 'OR (al menos una)'],
-                      ] as ['and' | 'or', string][]
+                        ['synchronized', 'Sincronizado (mes a mes)'],
+                      ] as [CombinatorMode, string][]
                     ).map(([combo, label]) => (
                       <button
                         key={combo}
@@ -983,45 +1357,154 @@ export default function ViewsPanel() {
                     ))}
                   </div>
 
-                  <div className="space-y-3">
-                    {compBuilder.components.map((comp, idx) => (
-                      <SingleViewBuilderForm
-                        key={idx}
-                        state={comp}
-                        setState={makeComponentSetState(idx)}
-                        hasEtfReturns={hasEtfReturns}
-                        hasYieldPaths={hasYieldPaths}
-                        title={`Condición ${idx + 1}`}
-                        onRemove={
-                          compBuilder.components.length > MIN_COMPOSITE_COMPONENTS
-                            ? () => removeComponent(idx)
-                            : undefined
-                        }
-                      />
-                    ))}
-                  </div>
+                  {/* ---------- AND/OR ---------- */}
+                  {(compBuilder.combinator === 'and' || compBuilder.combinator === 'or') && (
+                    <>
+                      <p className="text-[11px] text-mercantil-slate dark:text-mercantil-dark-slate italic">
+                        Cada condición puede tener su propia ventana temporal — útil para cruzar shocks en horizontes distintos
+                        (ej: "rally S&P 6m AND rally Eurozona 12m").
+                      </p>
+                      <div className="space-y-3">
+                        {compBuilder.components.map((comp, idx) => (
+                          <SingleViewBuilderForm
+                            key={idx}
+                            state={comp}
+                            setState={makeComponentSetState(idx)}
+                            hasEtfReturns={hasEtfReturns}
+                            hasYieldPaths={hasYieldPaths}
+                            title={`Condición ${idx + 1}`}
+                            onRemove={
+                              compBuilder.components.length > MIN_COMPOSITE_COMPONENTS
+                                ? () => removeComponent(idx)
+                                : undefined
+                            }
+                          />
+                        ))}
+                      </div>
 
-                  <div className="flex flex-wrap gap-3 items-center justify-between pt-1">
-                    <button
-                      type="button"
-                      onClick={addComponent}
-                      disabled={compBuilder.components.length >= MAX_COMPOSITE_COMPONENTS}
-                      className={`text-xs px-3 py-1.5 rounded border transition-colors ${
-                        compBuilder.components.length >= MAX_COMPOSITE_COMPONENTS
-                          ? 'bg-mercantil-line/50 text-mercantil-slate border-mercantil-line dark:bg-mercantil-dark-line/40 dark:text-mercantil-dark-slate dark:border-mercantil-dark-line cursor-not-allowed'
-                          : 'bg-white text-mercantil-navy border-mercantil-line hover:bg-mercantil-line/40 dark:bg-mercantil-dark-panel dark:text-mercantil-dark-navy-text dark:border-mercantil-dark-line dark:hover:bg-mercantil-dark-line/60'
-                      }`}
-                    >
-                      + Agregar condición ({compBuilder.components.length}/{MAX_COMPOSITE_COMPONENTS})
-                    </button>
-                    <button
-                      type="button"
-                      onClick={runComposite}
-                      className="mp-btn-primary bg-mercantil-orange hover:bg-mercantil-orange-deep text-xs px-5 py-2"
-                    >
-                      Evaluar combinado
-                    </button>
-                  </div>
+                      <div className="flex flex-wrap gap-3 items-center justify-between pt-1">
+                        <button
+                          type="button"
+                          onClick={addComponent}
+                          disabled={compBuilder.components.length >= MAX_COMPOSITE_COMPONENTS}
+                          className={`text-xs px-3 py-1.5 rounded border transition-colors ${
+                            compBuilder.components.length >= MAX_COMPOSITE_COMPONENTS
+                              ? 'bg-mercantil-line/50 text-mercantil-slate border-mercantil-line dark:bg-mercantil-dark-line/40 dark:text-mercantil-dark-slate dark:border-mercantil-dark-line cursor-not-allowed'
+                              : 'bg-white text-mercantil-navy border-mercantil-line hover:bg-mercantil-line/40 dark:bg-mercantil-dark-panel dark:text-mercantil-dark-navy-text dark:border-mercantil-dark-line dark:hover:bg-mercantil-dark-line/60'
+                          }`}
+                        >
+                          + Agregar condición ({compBuilder.components.length}/{MAX_COMPOSITE_COMPONENTS})
+                        </button>
+                        <button
+                          type="button"
+                          onClick={runComposite}
+                          className="mp-btn-primary bg-mercantil-orange hover:bg-mercantil-orange-deep text-xs px-5 py-2"
+                        >
+                          Evaluar combinado
+                        </button>
+                      </div>
+                    </>
+                  )}
+
+                  {/* ---------- SINCRONIZADO (Fase C.4) ---------- */}
+                  {compBuilder.combinator === 'synchronized' && (
+                    <>
+                      <p className="text-[11px] text-mercantil-slate dark:text-mercantil-dark-slate italic">
+                        Se cuentan los meses dentro de la ventana donde TODAS las condiciones se cumplen en el mismo mes.
+                        Matchea si el conteo ≥ "Meses mínimos". Útil para patrones como estanflación real
+                        (equity ↓ Y tasas ↑ en el mismo mes).
+                      </p>
+
+                      <div className="flex flex-wrap gap-4 items-end">
+                        <label className="flex flex-col gap-0.5">
+                          <span className="text-[10px] uppercase tracking-wider text-mercantil-slate dark:text-mercantil-dark-slate font-semibold">
+                            Ventana (meses desde mes 1)
+                          </span>
+                          <input
+                            type="number"
+                            value={compBuilder.syncWindowMonths}
+                            onChange={(e) =>
+                              setCompBuilder((c) => ({
+                                ...c,
+                                syncWindowMonths: Number(e.target.value),
+                              }))
+                            }
+                            min={1}
+                            max={360}
+                            className="w-24 px-2 py-1.5 text-xs rounded border border-mercantil-line dark:border-mercantil-dark-line bg-white dark:bg-mercantil-dark-panel text-mercantil-ink dark:text-mercantil-dark-ink tabular-nums focus:ring-1 focus:ring-mercantil-orange focus:outline-none"
+                          />
+                        </label>
+                        <label className="flex flex-col gap-0.5">
+                          <span className="text-[10px] uppercase tracking-wider text-mercantil-slate dark:text-mercantil-dark-slate font-semibold">
+                            Meses mínimos sincronizados
+                          </span>
+                          <input
+                            type="number"
+                            value={compBuilder.syncMinMonths}
+                            onChange={(e) =>
+                              setCompBuilder((c) => ({
+                                ...c,
+                                syncMinMonths: Number(e.target.value),
+                              }))
+                            }
+                            min={1}
+                            max={360}
+                            className="w-24 px-2 py-1.5 text-xs rounded border border-mercantil-line dark:border-mercantil-dark-line bg-white dark:bg-mercantil-dark-panel text-mercantil-ink dark:text-mercantil-dark-ink tabular-nums focus:ring-1 focus:ring-mercantil-orange focus:outline-none"
+                          />
+                        </label>
+                        {!syncMinMonthsValid && (
+                          <span className="text-[10px] text-rose-700 dark:text-rose-400">
+                            Meses mínimos debe estar entre 1 y la ventana.
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="space-y-3">
+                        {compBuilder.syncComponents.map((comp, idx) => (
+                          <SyncComponentForm
+                            key={idx}
+                            state={comp}
+                            setState={makeSyncComponentSetState(idx)}
+                            hasEtfReturns={hasEtfReturns}
+                            hasYieldPaths={hasYieldPaths}
+                            title={`Condición ${idx + 1}`}
+                            onRemove={
+                              compBuilder.syncComponents.length > MIN_COMPOSITE_COMPONENTS
+                                ? () => removeSyncComponent(idx)
+                                : undefined
+                            }
+                          />
+                        ))}
+                      </div>
+
+                      <div className="flex flex-wrap gap-3 items-center justify-between pt-1">
+                        <button
+                          type="button"
+                          onClick={addSyncComponent}
+                          disabled={compBuilder.syncComponents.length >= MAX_COMPOSITE_COMPONENTS}
+                          className={`text-xs px-3 py-1.5 rounded border transition-colors ${
+                            compBuilder.syncComponents.length >= MAX_COMPOSITE_COMPONENTS
+                              ? 'bg-mercantil-line/50 text-mercantil-slate border-mercantil-line dark:bg-mercantil-dark-line/40 dark:text-mercantil-dark-slate dark:border-mercantil-dark-line cursor-not-allowed'
+                              : 'bg-white text-mercantil-navy border-mercantil-line hover:bg-mercantil-line/40 dark:bg-mercantil-dark-panel dark:text-mercantil-dark-navy-text dark:border-mercantil-dark-line dark:hover:bg-mercantil-dark-line/60'
+                          }`}
+                        >
+                          + Agregar condición ({compBuilder.syncComponents.length}/{MAX_COMPOSITE_COMPONENTS})
+                        </button>
+                        <button
+                          type="button"
+                          onClick={runComposite}
+                          disabled={!syncMinMonthsValid}
+                          className={`mp-btn-primary text-xs px-5 py-2 ${
+                            syncMinMonthsValid
+                              ? 'bg-mercantil-orange hover:bg-mercantil-orange-deep'
+                              : 'bg-mercantil-line/60 cursor-not-allowed'
+                          }`}
+                        >
+                          Evaluar sincronizado
+                        </button>
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
 
@@ -1070,6 +1553,40 @@ export default function ViewsPanel() {
                     </p>
                     <div className="flex flex-wrap gap-2 mt-1.5">
                       {BUILT_IN_COMPOSITE_VIEWS.map((v) => {
+                        const disabled =
+                          (viewRequiresYieldPaths(v) && !hasYieldPaths) ||
+                          (viewRequiresEtfReturns(v) && !hasEtfReturns);
+                        return (
+                          <button
+                            key={v.id}
+                            type="button"
+                            onClick={() => activeView?.id === v.id ? clearView() : setActiveView(v.id)}
+                            disabled={disabled}
+                            title={v.description + (disabled ? ' (requiere yields/ETFs)' : '')}
+                            className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
+                              activeView?.id === v.id
+                                ? 'bg-mercantil-orange text-white border-mercantil-orange'
+                                : disabled
+                                  ? 'bg-mercantil-line/50 text-mercantil-slate border-mercantil-line dark:bg-mercantil-dark-line/40 dark:text-mercantil-dark-slate dark:border-mercantil-dark-line cursor-not-allowed'
+                                  : 'bg-white text-mercantil-navy border-mercantil-line hover:bg-mercantil-line/40 dark:bg-mercantil-dark-panel dark:text-mercantil-dark-navy-text dark:border-mercantil-dark-line dark:hover:bg-mercantil-dark-line/60'
+                            }`}
+                          >
+                            {v.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div>
+                    <span className="text-[10px] uppercase tracking-wider text-mercantil-slate dark:text-mercantil-dark-slate font-semibold">
+                      Sincronizados (co-movimiento mes a mes)
+                    </span>
+                    <p className="text-[10px] text-mercantil-slate dark:text-mercantil-dark-slate mt-0.5 italic">
+                      Más estrictos que los composite AND — exigen que las condiciones ocurran en los mismos meses, no solo dentro de la misma ventana.
+                    </p>
+                    <div className="flex flex-wrap gap-2 mt-1.5">
+                      {BUILT_IN_SYNCHRONIZED_VIEWS.map((v) => {
                         const disabled =
                           (viewRequiresYieldPaths(v) && !hasYieldPaths) ||
                           (viewRequiresEtfReturns(v) && !hasEtfReturns);
