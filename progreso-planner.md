@@ -2192,3 +2192,99 @@ Quedan:
 - Deploy automático en `andresborrerom.github.io/mercantil-planner/` tras el push.
 - La UI del tab composite quedó con 2 componentes default que ilustran un caso concreto (estanflación incipiente) — útil como ejemplo para asesores que abren el tab por primera vez.
 
+---
+
+## 2026-04-23 — Fase C.3: regímenes históricos · replay determinístico con 2 interpretaciones
+
+Nueva vista en la herramienta: aplicar un período histórico concreto al portafolio actual del usuario como un "what-if" determinístico (N=1, sin probabilidad). Complemento pedagógico del bootstrap probabilístico.
+
+### Regímenes implementados (nombres con fechas explícitas)
+
+1. **Crisis financiera global · oct-2007 a mar-2009** (18 meses).
+2. **Shock COVID · feb-2020 a dic-2020** (11 meses).
+3. **Bear de inflación · ene-2022 a oct-2022** (10 meses).
+
+### Decisiones de diseño (todas con OK del usuario 2026-04-23)
+
+1. **Dos interpretaciones simultáneas, sin toggle.** Mostrar ambas a la vez hace visible el gap entre ellas = impacto del carry al arrancar desde tasas actuales. En portafolios equity-puros las dos líneas coinciden; en RF-heavy el gap es educativo. Toggle ocultaría el punto pedagógico.
+
+2. **Fórmula `currentRates`:** `r_current_t = r_hist_t − carry_hist_t + (y_today/12)` aplicada solo a los 11 tickers RF. Para equity, ambos modos son idénticos (returns no dependen del nivel de yields). Para FIXED, invariante al modo (retorno nominal constante).
+
+3. **Fallback elegante en pre-launch:** si `RF_DECOMP[ticker]` tiene NaN en meses anteriores al launch del ETF (ej. GHYG antes de 2007-05, EMB antes de 2008-01), caemos al valor de `RETURNS` que ya está imputado con proxies. Así evitamos NaN en portafolios que tocan ETFs tempranos durante Crisis 2008.
+
+4. **Panel separado debajo del FanChart**, no overlay — el régimen es N=1 y no encaja en la distribución probabilística del FanChart.
+
+5. **Capital inicial:** `plan.initialCapital` del usuario si es > 0; sino $100,000 default. Sin aportes/retiros durante el período — muestra el portafolio "desnudo" bajo el shock.
+
+### Implementación
+
+**`src/domain/regimes.ts` (nuevo, ~280 líneas):**
+- `REGIMES: readonly RegimeDef[]` con los 3 regímenes.
+- `regimeWindow(regime)`: traduce startDate/endDate a `{startIdx, endIdx, length}` sobre DATES.
+- `computeRegimeReturns(spec, regime, mode, yieldInitial)`: expansión del portafolio vía `expandPortfolio` → loop sobre meses de la ventana → combinación ponderada de ETF returns + FIXED. Devuelve `Float32Array` de longitud `regime.length`.
+- `tickerReturnAt(ticker, monthIdx, mode, yieldInitial)`: núcleo del cálculo por ticker. Router entre equity (RETURNS directo), RF histórico (RETURNS directo), y RF currentRates (reconstrucción vía carry).
+- `computeValuePath(initial, returns)`: compone serie de valores acumulados. Output length = returns.length + 1 (incluye V[0] = initial).
+- `computeRegimeStats(valuePath)`: retorna `{totalReturn, maxDrawdown, finalValue}` para la tabla.
+- `findRegime(id)`: lookup por id.
+
+**`src/domain/regimes.test.ts` (nuevo, +12 tests):**
+- Validación de las 3 ventanas (start/end/length correctos).
+- `computeRegimeReturns` produce Float32Array con longitud correcta y valores finitos para las 3 signatures × 3 regímenes × 2 modos = 18 combos.
+- Portafolio 100% equity (USA.Eq) → historical y currentRates son IDÉNTICOS bit-exacto (contra-prueba del fallback erróneo).
+- Portafolio 100% RF (GlFI) → historical y currentRates DIFIEREN, y la diff es acotada (< 1%/mes).
+- `computeValuePath` recurrencia correcta (V[t] = V[t-1] × (1+r[t-1])).
+- `computeRegimeStats` drawdown no-positivo, totalReturn alineado con finalValue/initial-1.
+- Sanidad del dataset: RF_DECOMP.carry finito en los 3 regímenes para tickers clave.
+
+**`src/components/RegimesPanel.tsx` (nuevo, ~340 líneas):**
+- Header colapsable (default cerrado — no mete ruido al load inicial).
+- 3 pills de régimen con tooltip = descripción.
+- Descripción del régimen activo abajo.
+- Legenda con 4 items: A sólida/dashed + B sólida/dashed.
+- Chart `ComposedChart` de recharts con 4 `Line`:
+  - A currentRates: navy sólida, strokeWidth 2.
+  - A historical: navy dashed (5 3), strokeWidth 1.5, opacity 0.6.
+  - B currentRates: naranja sólida.
+  - B historical: naranja dashed, opacity 0.6.
+- Tooltip custom con 4 filas (bold las sólidas, dashed icon las históricas).
+- 2 sub-tablas lado a lado (Portafolio A, Portafolio B), cada una con 3 filas (Retorno total, Max drawdown, Valor final) × 2 columnas (Tasas actuales / Tasas del período).
+- Footer con nota explicativa (capital inicial, sin flujos, N=1).
+
+**`src/App.tsx`:**
+- Import `RegimesPanel`.
+- Insertado debajo del `ViewsPanel` (Fila 4c), antes del `ExportBar`.
+
+### Verificación
+
+- `npm test` → **272/272** (260 + 12 de regimes).
+- `npm run build` → limpio en 53s. Bundle `index-*.js` creció 1,074 → 1,087 KB (+13 KB del panel + recharts extra).
+- Sanity suites no se re-corrieron (sin cambios de motor bootstrap).
+
+### Comportamiento esperado en la UI
+
+1. Asesor abre la app → al hacer scroll abajo, panel "Regímenes históricos — replay determinístico" (colapsado).
+2. Expande → ve los 3 regímenes seleccionables, descripción del activo, chart con 4 líneas.
+3. Compara portafolios A vs B directamente sobre el shock concreto.
+4. Ve gap entre líneas sólidas (tasas de hoy) y dashed (tasas del período) = impacto del carry. En portafolios equity las líneas coinciden (esperado). En portafolios RF-heavy, el gap es mayor.
+5. Tabla inferior cuantifica: retorno total, max drawdown, valor final para las 4 combinaciones.
+
+### Pendientes actualizados
+
+Removidos del backlog:
+- ~~Fase C.3 — Regímenes históricos~~ (cerrada acá).
+
+Quedan:
+- Modo `synchronizedDirection` (estanflación real mes a mes).
+- Instructivo partes 2/3/4b (requieren screenshots — ahora con más views también).
+- E2E Playwright (bloqueado upstream).
+- Audit UX móvil — posterior a tener laptop/tablet estable.
+- Migración a repo privado bajo organización Mercantil AWM.
+- `mercantil-planner-build/` — sincronizar bajo demanda para uso offline.
+- Posible evolución de C.3: permitir agregar flujos durante el replay del régimen (hoy está "desnudo"). Y/o soportar un régimen custom definido por rango de fechas.
+
+### Estado al cierre
+
+- **272/272 tests · build limpio · Fase C.3 cerrada.**
+- Deploy automático en `andresborrerom.github.io/mercantil-planner/` tras el push.
+- Panel nuevo vive colapsado por default — asesor lo abre a demanda.
+

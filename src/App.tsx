@@ -4,6 +4,7 @@ import FlowEditor from './components/FlowEditor';
 import Header from './components/Header';
 import PortfolioSelector from './components/PortfolioSelector';
 import ProfilePreview from './components/ProfilePreview';
+import RegimesPanel from './components/RegimesPanel';
 import StatsPanel from './components/StatsPanel';
 import ViewsPanel from './components/ViewsPanel';
 import { usePlannerStore } from './state/store';
@@ -88,6 +89,9 @@ function App() {
 
           {/* Fila 4b: Views (análisis condicional) */}
           <ViewsPanel />
+
+          {/* Fila 4c: Regímenes históricos (Fase C.3) */}
+          <RegimesPanel />
 
           {/* Fila 5: Export */}
           <ExportBar />
