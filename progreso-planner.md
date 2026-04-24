@@ -2118,3 +2118,77 @@ La entrada del 2026-04-21 registraba que la sesión anterior se cortó con API e
 
 Conviene revisar el código antes de asumir que el backlog está al día. El bitácora es append-only (bueno para historia) pero se puede des-sincronizar si una sesión se cae antes de loggearse. Una auditoría rápida código vs backlog tras reanudar trabajo detecta estas discrepancias.
 
+---
+
+## 2026-04-23 — Fase C.2b UI: tab "Escenario combinado" con AND/OR + ventanas per-componente
+
+Implementación de la UI del composite builder (el dominio estaba cerrado desde 2026-04-20, ver entradas anteriores). Permite al usuario construir un `CompositeView` dinámico desde la interfaz.
+
+### Cambios
+
+**`src/state/store.ts`:**
+- `customView: View | null` → `customView: AnyView | null` (acepta composite).
+- `setCustomView: (view: View) => void` → `setCustomView: (view: AnyView) => void`.
+- `evaluateActiveView(..., customView: View | null, ...)` → `customView: AnyView | null`.
+- Removido import `type View` (ya no se usa).
+- El core de `evaluateActiveView` ya rutea correctamente vía `isCompositeView` (sin cambios de lógica).
+
+**`src/hooks/useViews.ts`:**
+- `setCustomView: (view: View) => void` → `(view: AnyView) => void`. Comentario actualizado: "Acepta tanto single como composite (Fase C.2b)".
+- Removido import `type View`.
+
+**`src/components/ViewsPanel.tsx`** (refactor sustancial):
+
+1. **Extracción de `SingleViewBuilderForm`** — sub-componente con los 4 pasos (subject, medida, filtro, horizonte). Props: `{ state, setState, hasEtfReturns, hasYieldPaths, title?, onRemove? }`. Encapsula los handlers internos (`update`, `handleSubjectKind`, `handleMeasureKind`). Sin botón "Evaluar" — ese vive en el parent. Reutilizable tanto en el tab single como en cada componente del composite.
+
+2. **Nuevos tipos/defaults:**
+   - `CompositeBuilderState = { combinator: 'and' | 'or'; components: BuilderState[] }`.
+   - `MAX_COMPOSITE_COMPONENTS = 4`, `MIN_COMPOSITE_COMPONENTS = 2`.
+   - `DEFAULT_COMPOSITE_BUILDER` — 2 componentes: equity shock -20/-10% + yield peakChange ≥100pbs (estanflación incipiente, AND).
+
+3. **`buildDynamicComposite(state)`** — reutiliza `buildDynamicView` para cada componente, calcula envelope de ventanas (min startMonth, max endMonth), genera label `"Escenario combinado · N condiciones (AND|OR)"` y description concatenada con " Y " / " O ".
+
+4. **Tab nuevo "Escenario combinado"** (junto a "Builder — single" y "Presets (13)"):
+   - Combinator pills AND / OR al tope.
+   - Stack de N sub-builders con título `"Condición K"`.
+   - Botón "Eliminar" por sub-builder (visible cuando N > 2).
+   - Botón "+ Agregar condición (K/4)" (deshabilitado en el límite).
+   - Botón "Evaluar combinado" a la derecha.
+   - Cada sub-builder preserva su estado independiente via `makeComponentSetState(idx)` — factory de `Dispatch<SetStateAction<BuilderState>>` que actualiza el componente correcto del array.
+
+5. **Tab "Builder — single" mantenido intacto** — ahora usa el mismo `SingleViewBuilderForm` refactorizado. Cero regresión funcional.
+
+### Tests (+3, total 260/260)
+
+En `src/state/store.test.ts`, nuevo describe `setCustomView con CompositeView (Fase C.2b UI)`:
+
+1. **Composite AND con 2 componentes válidos** → `activeViewId`/`customView`/analysis poblados. Con retornos flat, probabilidad = 1.
+2. **Composite OR con ventanas distintas** → paths pares flat 6m + paths impares rally 12m → OR cubre ambos → probabilidad = 1.
+3. **Composite con componente que requiere yields y no hay** → `viewError` menciona "yields".
+
+### Verificación
+
+- `npm test` → **260/260** (+3 composite tests).
+- `npm run build` → limpio en ~44s. Bundle `index-*.js` creció de 1,069 KB a 1,074 KB (+5 KB por tab composite + refactor del sub-componente).
+- Sanity suites no se re-corrieron (no hubo cambios de motor/dominio).
+
+### Pendientes actualizados
+
+Removidos del backlog:
+- ~~Fase C.2b UI~~ (cerrada acá).
+
+Quedan:
+- **Fase C.3 — Regímenes históricos**: Crisis financiera (oct-2007 a mar-2009), COVID (feb-2020 a dic-2020), Bear inflación (ene-2022 a oct-2022). Decisión de diseño acordada: mostrar ambas interpretaciones simultáneamente (RF con tasas actuales COMO arranque vs. RF con tasas del período). 4 líneas por regimen (A y B × ambas interpretaciones) en chart compacto debajo del FanChart. Implementación pendiente.
+- Modo `synchronizedDirection` (estanflación real mes a mes).
+- Instructivo partes 2/3/4b (requieren screenshots).
+- E2E Playwright (bloqueado upstream).
+- Audit UX móvil — posterior a tener laptop/tablet estable.
+- Migración a repo privado bajo organización Mercantil AWM.
+- `mercantil-planner-build/` — sincronizar bajo demanda para uso offline.
+
+### Estado al cierre
+
+- **260/260 tests · build limpio · Fase C.2b UI cerrada.**
+- Deploy automático en `andresborrerom.github.io/mercantil-planner/` tras el push.
+- La UI del tab composite quedó con 2 componentes default que ilustran un caso concreto (estanflación incipiente) — útil como ejemplo para asesores que abren el tab por primera vez.
+

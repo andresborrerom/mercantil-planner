@@ -34,7 +34,6 @@ import {
   viewRequiresYieldPaths,
   type AnyView,
   type AsymmetricAnalysis,
-  type View,
 } from '../domain/views';
 
 export type UseViewsResult = {
@@ -95,8 +94,9 @@ export type UseViewsResult = {
 
   /**
    * Activa un view dinámico (creado por el builder). Se evalúa inmediatamente.
+   * Acepta tanto single como composite (Fase C.2b).
    */
-  setCustomView: (view: View) => void;
+  setCustomView: (view: AnyView) => void;
 };
 
 export function useViews(): UseViewsResult {
@@ -147,7 +147,7 @@ export function useViews(): UseViewsResult {
   );
   const clearView = useCallback(() => setActiveViewStore(null), [setActiveViewStore]);
   const setCustomView = useCallback(
-    (view: View) => setCustomViewStore(view),
+    (view: AnyView) => setCustomViewStore(view),
     [setCustomViewStore],
   );
 

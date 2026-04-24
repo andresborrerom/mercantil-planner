@@ -10,11 +10,18 @@
  *   4. Horizonte: meses
  *
  * Los 13 presets built-in (9 single + 4 composite) se acceden desde la pestaña
- * "Presets". Los compuestos todavía no son construibles desde el builder — se
- * agregan en Fase C.2b (tab nuevo "Escenario combinado").
+ * "Presets". Los compuestos dinámicos se construyen en el tab "Escenario
+ * combinado" (Fase C.2b UI) con 2-4 componentes + combinator AND/OR y ventanas
+ * independientes por componente.
  */
 
-import { useCallback, useMemo, useState } from 'react';
+import {
+  useCallback,
+  useMemo,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from 'react';
 import type { Ticker } from '../data/market.generated';
 import {
   ETF_LABELS,
@@ -30,6 +37,7 @@ import {
   viewRequiresEtfReturns,
   viewRequiresYieldPaths,
   type AsymmetricAnalysis,
+  type CompositeView,
   type PredicateMode,
   type View,
   type ViewSubject,
@@ -122,6 +130,38 @@ const DEFAULT_BUILDER: BuilderState = {
   upperP: 40,
   horizonMonths: 12,
   persistentMonths: 3,
+};
+
+// ---------------------------------------------------------------------------
+// Fase C.2b UI — estado del builder compuesto (2-4 componentes + AND/OR)
+// ---------------------------------------------------------------------------
+
+type CompositeBuilderState = {
+  combinator: 'and' | 'or';
+  components: BuilderState[];
+};
+
+const MAX_COMPOSITE_COMPONENTS = 4;
+const MIN_COMPOSITE_COMPONENTS = 2;
+
+/**
+ * Default pedagógico: equity shock + yield spike AND-combinados (estanflación
+ * incipiente). El usuario puede ajustar ambos componentes libremente.
+ */
+const DEFAULT_COMPOSITE_BUILDER: CompositeBuilderState = {
+  combinator: 'and',
+  components: [
+    { ...DEFAULT_BUILDER },
+    {
+      ...DEFAULT_BUILDER,
+      subjectKind: 'yield',
+      yieldKey: 'TNX',
+      measureKind: 'peakChange',
+      filterKind: 'absolute',
+      minVal: '100',
+      maxVal: '',
+    },
+  ],
 };
 
 function buildSubject(state: BuilderState): ViewSubject {
@@ -270,6 +310,433 @@ function buildDynamicView(state: BuilderState): View {
   };
 }
 
+/**
+ * Fase C.2b UI — construye un `CompositeView` desde el estado del builder
+ * compuesto. Reutiliza `buildDynamicView` para cada componente, calcula el
+ * envelope de ventanas (min startMonth, max endMonth), y genera un
+ * label/description legibles.
+ *
+ * El dominio ya soporta ventanas distintas por componente (Fase C.2b dominio,
+ * 2026-04-20): `composite.window` es solo display envelope, cada componente
+ * valida su propia ventana internamente vía `evaluateSingleView`.
+ */
+function buildDynamicComposite(composite: CompositeBuilderState): CompositeView {
+  if (composite.components.length === 0) {
+    throw new Error('buildDynamicComposite: se requiere al menos 1 componente');
+  }
+  const components = composite.components.map(buildDynamicView);
+  let startMonth = Infinity;
+  let endMonth = -Infinity;
+  for (const c of components) {
+    if (c.window.startMonth < startMonth) startMonth = c.window.startMonth;
+    if (c.window.endMonth > endMonth) endMonth = c.window.endMonth;
+  }
+  const sep = composite.combinator === 'and' ? ' Y ' : ' O ';
+  const combLabel = composite.combinator === 'and' ? 'AND' : 'OR';
+  const label = `Escenario combinado · ${composite.components.length} condiciones (${combLabel})`;
+  const description = components.map((c) => c.description).join(sep);
+  const idParts = [
+    'dyn-composite',
+    composite.combinator,
+    `${composite.components.length}comp`,
+    Date.now().toString(36),
+  ];
+  return {
+    kind: 'composite',
+    id: idParts.join('-'),
+    label,
+    description,
+    combinator: composite.combinator,
+    components,
+    window: { startMonth, endMonth },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Sub-componente: formulario builder single-predicado (4 pasos)
+// ---------------------------------------------------------------------------
+
+/**
+ * Renderiza el builder single de 4 pasos (subject, medida, filtro, horizonte)
+ * sin el botón "Evaluar" — ese vive en el parent. Se usa tanto para el tab
+ * "Builder — single" como para cada componente del tab "Escenario combinado".
+ *
+ * Cuando `title` se provee, se muestra un encabezado con el título y (si
+ * `onRemove` está presente) un botón "Eliminar" para sacar ese componente
+ * del composite.
+ */
+function SingleViewBuilderForm({
+  state,
+  setState,
+  hasEtfReturns,
+  hasYieldPaths,
+  title,
+  onRemove,
+}: {
+  state: BuilderState;
+  setState: Dispatch<SetStateAction<BuilderState>>;
+  hasEtfReturns: boolean;
+  hasYieldPaths: boolean;
+  title?: string;
+  onRemove?: () => void;
+}) {
+  const etfGroups = useMemo(() => tickersByGroup(), []);
+
+  const update = useCallback(
+    <K extends keyof BuilderState>(key: K, value: BuilderState[K]) =>
+      setState((b) => ({ ...b, [key]: value })),
+    [setState],
+  );
+
+  // Si cambia subjectKind, resetear measureKind a uno compatible.
+  const handleSubjectKind = useCallback(
+    (k: SubjectKind) => {
+      setState((b) => {
+        const isReturn = k === 'etfReturn' || k === 'portfolioReturn';
+        const compatibleMeasure: MeasureKind = isReturn
+          ? b.measureKind === 'cumulative' ||
+            b.measureKind === 'peakCumulative' ||
+            b.measureKind === 'troughCumulative'
+            ? b.measureKind
+            : 'cumulative'
+          : b.measureKind === 'endpointChange' ||
+              b.measureKind === 'peakChange' ||
+              b.measureKind === 'troughChange' ||
+              b.measureKind === 'persistent'
+            ? b.measureKind
+            : 'endpointChange';
+        // Percentile filter solo aplica a cumulative endpoint; si el nuevo subject
+        // es yield o el measureKind nuevo no es cumulative, forzar absolute.
+        const compatibleFilter: FilterKind =
+          b.filterKind === 'percentile' && isReturn && compatibleMeasure === 'cumulative'
+            ? 'percentile'
+            : 'absolute';
+        return { ...b, subjectKind: k, measureKind: compatibleMeasure, filterKind: compatibleFilter };
+      });
+    },
+    [setState],
+  );
+
+  const handleMeasureKind = useCallback(
+    (m: MeasureKind) => {
+      setState((b) => {
+        // Percentile solo válido con cumulative (endpoint) de return. Si medida
+        // cambia a algo incompatible, forzar absolute.
+        const filterOk =
+          b.filterKind === 'percentile' &&
+          m === 'cumulative' &&
+          (b.subjectKind === 'etfReturn' || b.subjectKind === 'portfolioReturn');
+        return { ...b, measureKind: m, filterKind: filterOk ? 'percentile' : 'absolute' };
+      });
+    },
+    [setState],
+  );
+
+  const canUsePercentile =
+    (state.subjectKind === 'etfReturn' || state.subjectKind === 'portfolioReturn') &&
+    state.measureKind === 'cumulative';
+
+  const percentileAutoPct =
+    state.filterKind === 'percentile' ? state.upperP - state.lowerP : null;
+
+  const isReturnSubject =
+    state.subjectKind === 'etfReturn' || state.subjectKind === 'portfolioReturn';
+  const units = isReturnSubject ? '%' : 'pbs';
+
+  return (
+    <div
+      className={
+        title
+          ? 'space-y-4 rounded-md border border-mercantil-line/60 dark:border-mercantil-dark-line/60 bg-mercantil-mist/30 dark:bg-mercantil-dark-bg/30 p-3'
+          : 'space-y-4'
+      }
+    >
+      {title && (
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-semibold uppercase tracking-wider text-mercantil-navy dark:text-mercantil-dark-navy-text">
+            {title}
+          </span>
+          {onRemove && (
+            <button
+              type="button"
+              onClick={onRemove}
+              className="text-[10px] px-2 py-0.5 rounded border border-rose-300 dark:border-rose-800 text-rose-700 dark:text-rose-300 hover:bg-rose-50 dark:hover:bg-rose-950/40"
+            >
+              Eliminar
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Paso 1: Subject type */}
+      <div>
+        <div className="text-[10px] uppercase tracking-wider text-mercantil-slate dark:text-mercantil-dark-slate font-semibold mb-1.5">
+          1. Sobre qué condicionamos
+        </div>
+        <div className="flex gap-2 flex-wrap">
+          {([
+            ['etfReturn', 'ETF individual', !hasEtfReturns],
+            ['portfolioReturn', 'Portafolio A/B', false],
+            ['yield', 'Yield de Treasury', !hasYieldPaths],
+          ] as [SubjectKind, string, boolean][]).map(([k, label, disabled]) => (
+            <button
+              key={k}
+              type="button"
+              onClick={() => handleSubjectKind(k)}
+              disabled={disabled}
+              title={disabled ? 'Tildá «Habilitar ETFs individuales para views» junto al botón Simular y volvé a correr Simular' : undefined}
+              className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
+                state.subjectKind === k
+                  ? 'bg-mercantil-orange text-white border-mercantil-orange'
+                  : disabled
+                    ? 'bg-mercantil-line/50 text-mercantil-slate border-mercantil-line dark:bg-mercantil-dark-line/40 dark:text-mercantil-dark-slate dark:border-mercantil-dark-line cursor-not-allowed'
+                    : 'bg-white text-mercantil-navy border-mercantil-line hover:bg-mercantil-line/40 dark:bg-mercantil-dark-panel dark:text-mercantil-dark-navy-text dark:border-mercantil-dark-line dark:hover:bg-mercantil-dark-line/60'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {/* Selector específico según subject */}
+        <div className="mt-2">
+          {state.subjectKind === 'etfReturn' && (
+            <select
+              value={state.etfTicker}
+              onChange={(e) => update('etfTicker', e.target.value as Ticker)}
+              className="px-2 py-1.5 text-xs rounded border border-mercantil-line dark:border-mercantil-dark-line bg-white dark:bg-mercantil-dark-panel text-mercantil-ink dark:text-mercantil-dark-ink focus:ring-1 focus:ring-mercantil-orange focus:outline-none"
+            >
+              {GROUP_ORDER.map((group: EtfGroup) => (
+                <optgroup key={group} label={GROUP_LABELS[group]}>
+                  {etfGroups[group].map((t) => (
+                    <option key={t} value={t}>
+                      {ETF_LABELS[t].short} ({t})
+                    </option>
+                  ))}
+                </optgroup>
+              ))}
+            </select>
+          )}
+          {state.subjectKind === 'portfolioReturn' && (
+            <div className="flex gap-2">
+              {(['A', 'B'] as const).map((p) => (
+                <button
+                  key={p}
+                  type="button"
+                  onClick={() => update('portfolio', p)}
+                  className={`text-xs px-3 py-1.5 rounded border ${
+                    state.portfolio === p
+                      ? 'bg-mercantil-navy text-white border-mercantil-navy dark:bg-mercantil-dark-navy-text dark:text-mercantil-dark-bg dark:border-mercantil-dark-navy-text'
+                      : 'bg-white text-mercantil-navy border-mercantil-line dark:bg-mercantil-dark-panel dark:text-mercantil-dark-navy-text dark:border-mercantil-dark-line'
+                  }`}
+                >
+                  Portafolio {p}
+                </button>
+              ))}
+            </div>
+          )}
+          {state.subjectKind === 'yield' && (
+            <select
+              value={state.yieldKey}
+              onChange={(e) => update('yieldKey', e.target.value as YieldKey)}
+              className="px-2 py-1.5 text-xs rounded border border-mercantil-line dark:border-mercantil-dark-line bg-white dark:bg-mercantil-dark-panel text-mercantil-ink dark:text-mercantil-dark-ink focus:ring-1 focus:ring-mercantil-orange focus:outline-none"
+            >
+              {YIELD_OPTIONS.map((o) => (
+                <option key={o.key} value={o.key}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
+      </div>
+
+      {/* Paso 2: Measure */}
+      <div>
+        <div className="text-[10px] uppercase tracking-wider text-mercantil-slate dark:text-mercantil-dark-slate font-semibold mb-1.5">
+          2. Qué medimos
+        </div>
+        <div className="flex gap-2 flex-wrap">
+          {isReturnSubject
+            ? ([
+                ['cumulative', 'Retorno acumulado al cierre'],
+                ['peakCumulative', 'Pico acumulado (en algún momento)'],
+                ['troughCumulative', 'Piso acumulado (en algún momento)'],
+              ] as [MeasureKind, string][]).map(([m, label]) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => handleMeasureKind(m)}
+                  className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
+                    state.measureKind === m
+                      ? 'bg-mercantil-orange text-white border-mercantil-orange'
+                      : 'bg-white text-mercantil-navy border-mercantil-line hover:bg-mercantil-line/40 dark:bg-mercantil-dark-panel dark:text-mercantil-dark-navy-text dark:border-mercantil-dark-line dark:hover:bg-mercantil-dark-line/60'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))
+            : ([
+                ['endpointChange', 'Cambio pbs al cierre'],
+                ['peakChange', 'Pico pbs (en algún momento)'],
+                ['troughChange', 'Piso pbs (en algún momento)'],
+                ['persistent', 'Persistente ≥ N meses'],
+              ] as [MeasureKind, string][]).map(([m, label]) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => handleMeasureKind(m)}
+                  className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
+                    state.measureKind === m
+                      ? 'bg-mercantil-orange text-white border-mercantil-orange'
+                      : 'bg-white text-mercantil-navy border-mercantil-line hover:bg-mercantil-line/40 dark:bg-mercantil-dark-panel dark:text-mercantil-dark-navy-text dark:border-mercantil-dark-line dark:hover:bg-mercantil-dark-line/60'
+                  }`}
+                >
+                  {label}
+                </button>
+              ))}
+        </div>
+      </div>
+
+      {/* Paso 3: Filter */}
+      <div>
+        <div className="text-[10px] uppercase tracking-wider text-mercantil-slate dark:text-mercantil-dark-slate font-semibold mb-1.5">
+          3. Cómo filtramos los paths
+        </div>
+        <div className="flex gap-2 mb-2">
+          <button
+            type="button"
+            onClick={() => update('filterKind', 'absolute')}
+            className={`text-xs px-3 py-1.5 rounded border ${
+              state.filterKind === 'absolute'
+                ? 'bg-mercantil-navy text-white border-mercantil-navy dark:bg-mercantil-dark-navy-text dark:text-mercantil-dark-bg dark:border-mercantil-dark-navy-text'
+                : 'bg-white text-mercantil-navy border-mercantil-line dark:bg-mercantil-dark-panel dark:text-mercantil-dark-navy-text dark:border-mercantil-dark-line'
+            }`}
+          >
+            Rango absoluto
+          </button>
+          <button
+            type="button"
+            onClick={() => update('filterKind', 'percentile')}
+            disabled={!canUsePercentile}
+            title={!canUsePercentile ? 'Percentilar solo aplica a retorno acumulado al cierre de ETF o Portafolio' : undefined}
+            className={`text-xs px-3 py-1.5 rounded border ${
+              state.filterKind === 'percentile'
+                ? 'bg-mercantil-navy text-white border-mercantil-navy dark:bg-mercantil-dark-navy-text dark:text-mercantil-dark-bg dark:border-mercantil-dark-navy-text'
+                : !canUsePercentile
+                  ? 'bg-mercantil-line/50 text-mercantil-slate border-mercantil-line dark:bg-mercantil-dark-line/40 dark:text-mercantil-dark-slate dark:border-mercantil-dark-line cursor-not-allowed'
+                  : 'bg-white text-mercantil-navy border-mercantil-line dark:bg-mercantil-dark-panel dark:text-mercantil-dark-navy-text dark:border-mercantil-dark-line'
+            }`}
+          >
+            Rango percentilar
+          </button>
+        </div>
+
+        {state.filterKind === 'absolute' ? (
+          <div className="flex flex-wrap gap-3 items-end">
+            <label className="flex flex-col gap-0.5">
+              <span className="text-[10px] uppercase tracking-wider text-mercantil-slate dark:text-mercantil-dark-slate font-semibold">
+                Min ({units})
+              </span>
+              <input
+                type="text"
+                value={state.minVal}
+                onChange={(e) => update('minVal', e.target.value)}
+                placeholder="sin cota"
+                className="w-24 px-2 py-1.5 text-xs rounded border border-mercantil-line dark:border-mercantil-dark-line bg-white dark:bg-mercantil-dark-panel text-mercantil-ink dark:text-mercantil-dark-ink tabular-nums focus:ring-1 focus:ring-mercantil-orange focus:outline-none"
+              />
+            </label>
+            <label className="flex flex-col gap-0.5">
+              <span className="text-[10px] uppercase tracking-wider text-mercantil-slate dark:text-mercantil-dark-slate font-semibold">
+                Max ({units})
+              </span>
+              <input
+                type="text"
+                value={state.maxVal}
+                onChange={(e) => update('maxVal', e.target.value)}
+                placeholder="sin cota"
+                className="w-24 px-2 py-1.5 text-xs rounded border border-mercantil-line dark:border-mercantil-dark-line bg-white dark:bg-mercantil-dark-panel text-mercantil-ink dark:text-mercantil-dark-ink tabular-nums focus:ring-1 focus:ring-mercantil-orange focus:outline-none"
+              />
+            </label>
+            <p className="text-[10px] text-mercantil-slate dark:text-mercantil-dark-slate italic">
+              Dejá vacío para "sin cota" en ese extremo.
+            </p>
+          </div>
+        ) : (
+          <div className="flex flex-wrap gap-3 items-end">
+            <label className="flex flex-col gap-0.5">
+              <span className="text-[10px] uppercase tracking-wider text-mercantil-slate dark:text-mercantil-dark-slate font-semibold">
+                Percentil inferior
+              </span>
+              <input
+                type="number"
+                value={state.lowerP}
+                onChange={(e) => update('lowerP', Number(e.target.value))}
+                min={0}
+                max={100}
+                className="w-20 px-2 py-1.5 text-xs rounded border border-mercantil-line dark:border-mercantil-dark-line bg-white dark:bg-mercantil-dark-panel text-mercantil-ink dark:text-mercantil-dark-ink tabular-nums focus:ring-1 focus:ring-mercantil-orange focus:outline-none"
+              />
+            </label>
+            <label className="flex flex-col gap-0.5">
+              <span className="text-[10px] uppercase tracking-wider text-mercantil-slate dark:text-mercantil-dark-slate font-semibold">
+                Percentil superior
+              </span>
+              <input
+                type="number"
+                value={state.upperP}
+                onChange={(e) => update('upperP', Number(e.target.value))}
+                min={0}
+                max={100}
+                className="w-20 px-2 py-1.5 text-xs rounded border border-mercantil-line dark:border-mercantil-dark-line bg-white dark:bg-mercantil-dark-panel text-mercantil-ink dark:text-mercantil-dark-ink tabular-nums focus:ring-1 focus:ring-mercantil-orange focus:outline-none"
+              />
+            </label>
+            {percentileAutoPct !== null && (
+              <div className="text-[11px] px-2.5 py-1.5 rounded bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
+                <strong>Probabilidad auto: {percentileAutoPct.toFixed(0)}%</strong> (por construcción)
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Paso 4: Horizon + persistent months */}
+      <div className="flex flex-wrap gap-3 items-end">
+        <label className="flex flex-col gap-0.5">
+          <span className="text-[10px] uppercase tracking-wider text-mercantil-slate dark:text-mercantil-dark-slate font-semibold">
+            4. Horizonte
+          </span>
+          <div className="flex items-center gap-1">
+            <input
+              type="number"
+              value={state.horizonMonths}
+              onChange={(e) => update('horizonMonths', Number(e.target.value))}
+              min={1}
+              max={360}
+              className="w-20 px-2 py-1.5 text-xs rounded border border-mercantil-line dark:border-mercantil-dark-line bg-white dark:bg-mercantil-dark-panel text-mercantil-ink dark:text-mercantil-dark-ink tabular-nums focus:ring-1 focus:ring-mercantil-orange focus:outline-none"
+            />
+            <span className="text-[10px] text-mercantil-slate dark:text-mercantil-dark-slate">meses</span>
+          </div>
+        </label>
+        {state.measureKind === 'persistent' && (
+          <label className="flex flex-col gap-0.5">
+            <span className="text-[10px] uppercase tracking-wider text-mercantil-slate dark:text-mercantil-dark-slate font-semibold">
+              Meses consecutivos ≥ threshold
+            </span>
+            <input
+              type="number"
+              value={state.persistentMonths}
+              onChange={(e) => update('persistentMonths', Number(e.target.value))}
+              min={1}
+              max={360}
+              className="w-20 px-2 py-1.5 text-xs rounded border border-mercantil-line dark:border-mercantil-dark-line bg-white dark:bg-mercantil-dark-panel text-mercantil-ink dark:text-mercantil-dark-ink tabular-nums focus:ring-1 focus:ring-mercantil-orange focus:outline-none"
+            />
+          </label>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Sub-componente: tabla asimétrica de métricas A o B
 // ---------------------------------------------------------------------------
@@ -340,6 +807,8 @@ function AsymmetricTable({ analysis, portfolioLabel, accentClass }: {
 // Componente principal
 // ---------------------------------------------------------------------------
 
+type ActiveTab = 'builder' | 'composite' | 'preset';
+
 export default function ViewsPanel() {
   const {
     activeView,
@@ -359,72 +828,54 @@ export default function ViewsPanel() {
   } = useViews();
 
   const [expanded, setExpanded] = useState(false);
-  const [activeTab, setActiveTab] = useState<'builder' | 'preset'>('builder');
+  const [activeTab, setActiveTab] = useState<ActiveTab>('builder');
   const [builder, setBuilder] = useState<BuilderState>(DEFAULT_BUILDER);
-
-  const etfGroups = useMemo(() => tickersByGroup(), []);
-
-  const update = useCallback(
-    <K extends keyof BuilderState>(key: K, value: BuilderState[K]) =>
-      setBuilder((b) => ({ ...b, [key]: value })),
-    [],
+  const [compBuilder, setCompBuilder] = useState<CompositeBuilderState>(
+    DEFAULT_COMPOSITE_BUILDER,
   );
-
-  // Si cambia subjectKind, resetear measureKind a uno compatible.
-  const handleSubjectKind = useCallback((k: SubjectKind) => {
-    setBuilder((b) => {
-      const isReturn = k === 'etfReturn' || k === 'portfolioReturn';
-      const compatibleMeasure: MeasureKind = isReturn
-        ? b.measureKind === 'cumulative' ||
-          b.measureKind === 'peakCumulative' ||
-          b.measureKind === 'troughCumulative'
-          ? b.measureKind
-          : 'cumulative'
-        : b.measureKind === 'endpointChange' ||
-            b.measureKind === 'peakChange' ||
-            b.measureKind === 'troughChange' ||
-            b.measureKind === 'persistent'
-          ? b.measureKind
-          : 'endpointChange';
-      // Percentile filter solo aplica a cumulative endpoint; si el nuevo subject
-      // es yield o el measureKind nuevo no es cumulative, forzar absolute.
-      const compatibleFilter: FilterKind =
-        b.filterKind === 'percentile' && isReturn && compatibleMeasure === 'cumulative'
-          ? 'percentile'
-          : 'absolute';
-      return { ...b, subjectKind: k, measureKind: compatibleMeasure, filterKind: compatibleFilter };
-    });
-  }, []);
-
-  const handleMeasureKind = useCallback((m: MeasureKind) => {
-    setBuilder((b) => {
-      // Percentile solo válido con cumulative (endpoint) de return. Si medida
-      // cambia a algo incompatible, forzar absolute.
-      const filterOk =
-        b.filterKind === 'percentile' &&
-        m === 'cumulative' &&
-        (b.subjectKind === 'etfReturn' || b.subjectKind === 'portfolioReturn');
-      return { ...b, measureKind: m, filterKind: filterOk ? 'percentile' : 'absolute' };
-    });
-  }, []);
 
   const runBuilder = useCallback(() => {
     const view = buildDynamicView(builder);
     setCustomView(view);
   }, [builder, setCustomView]);
 
+  const runComposite = useCallback(() => {
+    const view = buildDynamicComposite(compBuilder);
+    setCustomView(view);
+  }, [compBuilder, setCustomView]);
+
+  const addComponent = useCallback(() => {
+    setCompBuilder((c) =>
+      c.components.length >= MAX_COMPOSITE_COMPONENTS
+        ? c
+        : { ...c, components: [...c.components, { ...DEFAULT_BUILDER }] },
+    );
+  }, []);
+
+  const removeComponent = useCallback((idx: number) => {
+    setCompBuilder((c) =>
+      c.components.length <= MIN_COMPOSITE_COMPONENTS
+        ? c
+        : { ...c, components: c.components.filter((_, i) => i !== idx) },
+    );
+  }, []);
+
+  const makeComponentSetState = useCallback(
+    (idx: number): Dispatch<SetStateAction<BuilderState>> =>
+      (updater) =>
+        setCompBuilder((c) => ({
+          ...c,
+          components: c.components.map((comp, i) => {
+            if (i !== idx) return comp;
+            return typeof updater === 'function'
+              ? (updater as (s: BuilderState) => BuilderState)(comp)
+              : updater;
+          }),
+        })),
+    [],
+  );
+
   const badge = confidenceBadge(nMatched);
-
-  const canUsePercentile =
-    (builder.subjectKind === 'etfReturn' || builder.subjectKind === 'portfolioReturn') &&
-    builder.measureKind === 'cumulative';
-
-  const percentileAutoPct =
-    builder.filterKind === 'percentile' ? builder.upperP - builder.lowerP : null;
-
-  const isReturnSubject =
-    builder.subjectKind === 'etfReturn' || builder.subjectKind === 'portfolioReturn';
-  const units = isReturnSubject ? '%' : 'pbs';
 
   return (
     <div className="mp-card p-5">
@@ -454,9 +905,10 @@ export default function ViewsPanel() {
               {/* Tabs */}
               <div className="flex gap-2 flex-wrap">
                 {([
-                  ['builder', 'Builder — crear view'],
+                  ['builder', 'Builder — single'],
+                  ['composite', 'Escenario combinado'],
                   ['preset', 'Presets (13)'],
-                ] as [typeof activeTab, string][]).map(([t, label]) => (
+                ] as [ActiveTab, string][]).map(([t, label]) => (
                   <button
                     key={t}
                     type="button"
@@ -472,283 +924,102 @@ export default function ViewsPanel() {
                 ))}
               </div>
 
-              {/* ========== BUILDER UNIFICADO ========== */}
+              {/* ========== BUILDER SINGLE ========== */}
               {activeTab === 'builder' && (
                 <div className="rounded-lg border border-mercantil-line dark:border-mercantil-dark-line p-4 space-y-4">
                   <p className="text-xs text-mercantil-slate dark:text-mercantil-dark-slate">
                     Armá un view paso a paso: sobre qué, qué medir, cómo filtrar, y a cuántos meses.
                   </p>
-
-                  {/* Paso 1: Subject type */}
-                  <div>
-                    <div className="text-[10px] uppercase tracking-wider text-mercantil-slate dark:text-mercantil-dark-slate font-semibold mb-1.5">
-                      1. Sobre qué condicionamos
-                    </div>
-                    <div className="flex gap-2 flex-wrap">
-                      {([
-                        ['etfReturn', 'ETF individual', !hasEtfReturns],
-                        ['portfolioReturn', 'Portafolio A/B', false],
-                        ['yield', 'Yield de Treasury', !hasYieldPaths],
-                      ] as [SubjectKind, string, boolean][]).map(([k, label, disabled]) => (
-                        <button
-                          key={k}
-                          type="button"
-                          onClick={() => handleSubjectKind(k)}
-                          disabled={disabled}
-                          title={disabled ? 'Tildá «Habilitar ETFs individuales para views» junto al botón Simular y volvé a correr Simular' : undefined}
-                          className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
-                            builder.subjectKind === k
-                              ? 'bg-mercantil-orange text-white border-mercantil-orange'
-                              : disabled
-                                ? 'bg-mercantil-line/50 text-mercantil-slate border-mercantil-line dark:bg-mercantil-dark-line/40 dark:text-mercantil-dark-slate dark:border-mercantil-dark-line cursor-not-allowed'
-                                : 'bg-white text-mercantil-navy border-mercantil-line hover:bg-mercantil-line/40 dark:bg-mercantil-dark-panel dark:text-mercantil-dark-navy-text dark:border-mercantil-dark-line dark:hover:bg-mercantil-dark-line/60'
-                          }`}
-                        >
-                          {label}
-                        </button>
-                      ))}
-                    </div>
-
-                    {/* Selector específico según subject */}
-                    <div className="mt-2">
-                      {builder.subjectKind === 'etfReturn' && (
-                        <select
-                          value={builder.etfTicker}
-                          onChange={(e) => update('etfTicker', e.target.value as Ticker)}
-                          className="px-2 py-1.5 text-xs rounded border border-mercantil-line dark:border-mercantil-dark-line bg-white dark:bg-mercantil-dark-panel text-mercantil-ink dark:text-mercantil-dark-ink focus:ring-1 focus:ring-mercantil-orange focus:outline-none"
-                        >
-                          {GROUP_ORDER.map((group: EtfGroup) => (
-                            <optgroup key={group} label={GROUP_LABELS[group]}>
-                              {etfGroups[group].map((t) => (
-                                <option key={t} value={t}>
-                                  {ETF_LABELS[t].short} ({t})
-                                </option>
-                              ))}
-                            </optgroup>
-                          ))}
-                        </select>
-                      )}
-                      {builder.subjectKind === 'portfolioReturn' && (
-                        <div className="flex gap-2">
-                          {(['A', 'B'] as const).map((p) => (
-                            <button
-                              key={p}
-                              type="button"
-                              onClick={() => update('portfolio', p)}
-                              className={`text-xs px-3 py-1.5 rounded border ${
-                                builder.portfolio === p
-                                  ? 'bg-mercantil-navy text-white border-mercantil-navy dark:bg-mercantil-dark-navy-text dark:text-mercantil-dark-bg dark:border-mercantil-dark-navy-text'
-                                  : 'bg-white text-mercantil-navy border-mercantil-line dark:bg-mercantil-dark-panel dark:text-mercantil-dark-navy-text dark:border-mercantil-dark-line'
-                              }`}
-                            >
-                              Portafolio {p}
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                      {builder.subjectKind === 'yield' && (
-                        <select
-                          value={builder.yieldKey}
-                          onChange={(e) => update('yieldKey', e.target.value as YieldKey)}
-                          className="px-2 py-1.5 text-xs rounded border border-mercantil-line dark:border-mercantil-dark-line bg-white dark:bg-mercantil-dark-panel text-mercantil-ink dark:text-mercantil-dark-ink focus:ring-1 focus:ring-mercantil-orange focus:outline-none"
-                        >
-                          {YIELD_OPTIONS.map((o) => (
-                            <option key={o.key} value={o.key}>
-                              {o.label}
-                            </option>
-                          ))}
-                        </select>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Paso 2: Measure */}
-                  <div>
-                    <div className="text-[10px] uppercase tracking-wider text-mercantil-slate dark:text-mercantil-dark-slate font-semibold mb-1.5">
-                      2. Qué medimos
-                    </div>
-                    <div className="flex gap-2 flex-wrap">
-                      {isReturnSubject
-                        ? ([
-                            ['cumulative', 'Retorno acumulado al cierre'],
-                            ['peakCumulative', 'Pico acumulado (en algún momento)'],
-                            ['troughCumulative', 'Piso acumulado (en algún momento)'],
-                          ] as [MeasureKind, string][]).map(([m, label]) => (
-                            <button
-                              key={m}
-                              type="button"
-                              onClick={() => handleMeasureKind(m)}
-                              className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
-                                builder.measureKind === m
-                                  ? 'bg-mercantil-orange text-white border-mercantil-orange'
-                                  : 'bg-white text-mercantil-navy border-mercantil-line hover:bg-mercantil-line/40 dark:bg-mercantil-dark-panel dark:text-mercantil-dark-navy-text dark:border-mercantil-dark-line dark:hover:bg-mercantil-dark-line/60'
-                              }`}
-                            >
-                              {label}
-                            </button>
-                          ))
-                        : ([
-                            ['endpointChange', 'Cambio pbs al cierre'],
-                            ['peakChange', 'Pico pbs (en algún momento)'],
-                            ['troughChange', 'Piso pbs (en algún momento)'],
-                            ['persistent', 'Persistente ≥ N meses'],
-                          ] as [MeasureKind, string][]).map(([m, label]) => (
-                            <button
-                              key={m}
-                              type="button"
-                              onClick={() => handleMeasureKind(m)}
-                              className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
-                                builder.measureKind === m
-                                  ? 'bg-mercantil-orange text-white border-mercantil-orange'
-                                  : 'bg-white text-mercantil-navy border-mercantil-line hover:bg-mercantil-line/40 dark:bg-mercantil-dark-panel dark:text-mercantil-dark-navy-text dark:border-mercantil-dark-line dark:hover:bg-mercantil-dark-line/60'
-                              }`}
-                            >
-                              {label}
-                            </button>
-                          ))}
-                    </div>
-                  </div>
-
-                  {/* Paso 3: Filter */}
-                  <div>
-                    <div className="text-[10px] uppercase tracking-wider text-mercantil-slate dark:text-mercantil-dark-slate font-semibold mb-1.5">
-                      3. Cómo filtramos los paths
-                    </div>
-                    <div className="flex gap-2 mb-2">
-                      <button
-                        type="button"
-                        onClick={() => update('filterKind', 'absolute')}
-                        className={`text-xs px-3 py-1.5 rounded border ${
-                          builder.filterKind === 'absolute'
-                            ? 'bg-mercantil-navy text-white border-mercantil-navy dark:bg-mercantil-dark-navy-text dark:text-mercantil-dark-bg dark:border-mercantil-dark-navy-text'
-                            : 'bg-white text-mercantil-navy border-mercantil-line dark:bg-mercantil-dark-panel dark:text-mercantil-dark-navy-text dark:border-mercantil-dark-line'
-                        }`}
-                      >
-                        Rango absoluto
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => update('filterKind', 'percentile')}
-                        disabled={!canUsePercentile}
-                        title={!canUsePercentile ? 'Percentilar solo aplica a retorno acumulado al cierre de ETF o Portafolio' : undefined}
-                        className={`text-xs px-3 py-1.5 rounded border ${
-                          builder.filterKind === 'percentile'
-                            ? 'bg-mercantil-navy text-white border-mercantil-navy dark:bg-mercantil-dark-navy-text dark:text-mercantil-dark-bg dark:border-mercantil-dark-navy-text'
-                            : !canUsePercentile
-                              ? 'bg-mercantil-line/50 text-mercantil-slate border-mercantil-line dark:bg-mercantil-dark-line/40 dark:text-mercantil-dark-slate dark:border-mercantil-dark-line cursor-not-allowed'
-                              : 'bg-white text-mercantil-navy border-mercantil-line dark:bg-mercantil-dark-panel dark:text-mercantil-dark-navy-text dark:border-mercantil-dark-line'
-                        }`}
-                      >
-                        Rango percentilar
-                      </button>
-                    </div>
-
-                    {builder.filterKind === 'absolute' ? (
-                      <div className="flex flex-wrap gap-3 items-end">
-                        <label className="flex flex-col gap-0.5">
-                          <span className="text-[10px] uppercase tracking-wider text-mercantil-slate dark:text-mercantil-dark-slate font-semibold">
-                            Min ({units})
-                          </span>
-                          <input
-                            type="text"
-                            value={builder.minVal}
-                            onChange={(e) => update('minVal', e.target.value)}
-                            placeholder="sin cota"
-                            className="w-24 px-2 py-1.5 text-xs rounded border border-mercantil-line dark:border-mercantil-dark-line bg-white dark:bg-mercantil-dark-panel text-mercantil-ink dark:text-mercantil-dark-ink tabular-nums focus:ring-1 focus:ring-mercantil-orange focus:outline-none"
-                          />
-                        </label>
-                        <label className="flex flex-col gap-0.5">
-                          <span className="text-[10px] uppercase tracking-wider text-mercantil-slate dark:text-mercantil-dark-slate font-semibold">
-                            Max ({units})
-                          </span>
-                          <input
-                            type="text"
-                            value={builder.maxVal}
-                            onChange={(e) => update('maxVal', e.target.value)}
-                            placeholder="sin cota"
-                            className="w-24 px-2 py-1.5 text-xs rounded border border-mercantil-line dark:border-mercantil-dark-line bg-white dark:bg-mercantil-dark-panel text-mercantil-ink dark:text-mercantil-dark-ink tabular-nums focus:ring-1 focus:ring-mercantil-orange focus:outline-none"
-                          />
-                        </label>
-                        <p className="text-[10px] text-mercantil-slate dark:text-mercantil-dark-slate italic">
-                          Dejá vacío para "sin cota" en ese extremo.
-                        </p>
-                      </div>
-                    ) : (
-                      <div className="flex flex-wrap gap-3 items-end">
-                        <label className="flex flex-col gap-0.5">
-                          <span className="text-[10px] uppercase tracking-wider text-mercantil-slate dark:text-mercantil-dark-slate font-semibold">
-                            Percentil inferior
-                          </span>
-                          <input
-                            type="number"
-                            value={builder.lowerP}
-                            onChange={(e) => update('lowerP', Number(e.target.value))}
-                            min={0}
-                            max={100}
-                            className="w-20 px-2 py-1.5 text-xs rounded border border-mercantil-line dark:border-mercantil-dark-line bg-white dark:bg-mercantil-dark-panel text-mercantil-ink dark:text-mercantil-dark-ink tabular-nums focus:ring-1 focus:ring-mercantil-orange focus:outline-none"
-                          />
-                        </label>
-                        <label className="flex flex-col gap-0.5">
-                          <span className="text-[10px] uppercase tracking-wider text-mercantil-slate dark:text-mercantil-dark-slate font-semibold">
-                            Percentil superior
-                          </span>
-                          <input
-                            type="number"
-                            value={builder.upperP}
-                            onChange={(e) => update('upperP', Number(e.target.value))}
-                            min={0}
-                            max={100}
-                            className="w-20 px-2 py-1.5 text-xs rounded border border-mercantil-line dark:border-mercantil-dark-line bg-white dark:bg-mercantil-dark-panel text-mercantil-ink dark:text-mercantil-dark-ink tabular-nums focus:ring-1 focus:ring-mercantil-orange focus:outline-none"
-                          />
-                        </label>
-                        {percentileAutoPct !== null && (
-                          <div className="text-[11px] px-2.5 py-1.5 rounded bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
-                            <strong>Probabilidad auto: {percentileAutoPct.toFixed(0)}%</strong> (por construcción)
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Paso 4: Horizon + persistent months */}
-                  <div className="flex flex-wrap gap-3 items-end">
-                    <label className="flex flex-col gap-0.5">
-                      <span className="text-[10px] uppercase tracking-wider text-mercantil-slate dark:text-mercantil-dark-slate font-semibold">
-                        4. Horizonte
-                      </span>
-                      <div className="flex items-center gap-1">
-                        <input
-                          type="number"
-                          value={builder.horizonMonths}
-                          onChange={(e) => update('horizonMonths', Number(e.target.value))}
-                          min={1}
-                          max={360}
-                          className="w-20 px-2 py-1.5 text-xs rounded border border-mercantil-line dark:border-mercantil-dark-line bg-white dark:bg-mercantil-dark-panel text-mercantil-ink dark:text-mercantil-dark-ink tabular-nums focus:ring-1 focus:ring-mercantil-orange focus:outline-none"
-                        />
-                        <span className="text-[10px] text-mercantil-slate dark:text-mercantil-dark-slate">meses</span>
-                      </div>
-                    </label>
-                    {builder.measureKind === 'persistent' && (
-                      <label className="flex flex-col gap-0.5">
-                        <span className="text-[10px] uppercase tracking-wider text-mercantil-slate dark:text-mercantil-dark-slate font-semibold">
-                          Meses consecutivos ≥ threshold
-                        </span>
-                        <input
-                          type="number"
-                          value={builder.persistentMonths}
-                          onChange={(e) => update('persistentMonths', Number(e.target.value))}
-                          min={1}
-                          max={360}
-                          className="w-20 px-2 py-1.5 text-xs rounded border border-mercantil-line dark:border-mercantil-dark-line bg-white dark:bg-mercantil-dark-panel text-mercantil-ink dark:text-mercantil-dark-ink tabular-nums focus:ring-1 focus:ring-mercantil-orange focus:outline-none"
-                        />
-                      </label>
-                    )}
+                  <SingleViewBuilderForm
+                    state={builder}
+                    setState={setBuilder}
+                    hasEtfReturns={hasEtfReturns}
+                    hasYieldPaths={hasYieldPaths}
+                  />
+                  <div className="flex justify-end">
                     <button
                       type="button"
                       onClick={runBuilder}
-                      className="mp-btn-primary bg-mercantil-orange hover:bg-mercantil-orange-deep text-xs px-5 py-2 ml-auto"
+                      className="mp-btn-primary bg-mercantil-orange hover:bg-mercantil-orange-deep text-xs px-5 py-2"
                     >
                       Evaluar
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {/* ========== BUILDER COMPUESTO (Fase C.2b UI) ========== */}
+              {activeTab === 'composite' && (
+                <div className="rounded-lg border border-mercantil-line dark:border-mercantil-dark-line p-4 space-y-4">
+                  <p className="text-xs text-mercantil-slate dark:text-mercantil-dark-slate">
+                    Combiná {MIN_COMPOSITE_COMPONENTS}–{MAX_COMPOSITE_COMPONENTS} condiciones con AND (todas se cumplen a la vez) u OR (al menos una).
+                    Cada condición puede tener su propia ventana temporal — útil para cruzar shocks en
+                    horizontes distintos (ej: "rally S&P 6m AND rally Eurozona 12m").
+                  </p>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-[10px] uppercase tracking-wider text-mercantil-slate dark:text-mercantil-dark-slate font-semibold">
+                      Combinator:
+                    </span>
+                    {(
+                      [
+                        ['and', 'AND (todas)'],
+                        ['or', 'OR (al menos una)'],
+                      ] as ['and' | 'or', string][]
+                    ).map(([combo, label]) => (
+                      <button
+                        key={combo}
+                        type="button"
+                        onClick={() =>
+                          setCompBuilder((c) => ({ ...c, combinator: combo }))
+                        }
+                        className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
+                          compBuilder.combinator === combo
+                            ? 'bg-mercantil-orange text-white border-mercantil-orange'
+                            : 'bg-white text-mercantil-navy border-mercantil-line hover:bg-mercantil-line/40 dark:bg-mercantil-dark-panel dark:text-mercantil-dark-navy-text dark:border-mercantil-dark-line dark:hover:bg-mercantil-dark-line/60'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="space-y-3">
+                    {compBuilder.components.map((comp, idx) => (
+                      <SingleViewBuilderForm
+                        key={idx}
+                        state={comp}
+                        setState={makeComponentSetState(idx)}
+                        hasEtfReturns={hasEtfReturns}
+                        hasYieldPaths={hasYieldPaths}
+                        title={`Condición ${idx + 1}`}
+                        onRemove={
+                          compBuilder.components.length > MIN_COMPOSITE_COMPONENTS
+                            ? () => removeComponent(idx)
+                            : undefined
+                        }
+                      />
+                    ))}
+                  </div>
+
+                  <div className="flex flex-wrap gap-3 items-center justify-between pt-1">
+                    <button
+                      type="button"
+                      onClick={addComponent}
+                      disabled={compBuilder.components.length >= MAX_COMPOSITE_COMPONENTS}
+                      className={`text-xs px-3 py-1.5 rounded border transition-colors ${
+                        compBuilder.components.length >= MAX_COMPOSITE_COMPONENTS
+                          ? 'bg-mercantil-line/50 text-mercantil-slate border-mercantil-line dark:bg-mercantil-dark-line/40 dark:text-mercantil-dark-slate dark:border-mercantil-dark-line cursor-not-allowed'
+                          : 'bg-white text-mercantil-navy border-mercantil-line hover:bg-mercantil-line/40 dark:bg-mercantil-dark-panel dark:text-mercantil-dark-navy-text dark:border-mercantil-dark-line dark:hover:bg-mercantil-dark-line/60'
+                      }`}
+                    >
+                      + Agregar condición ({compBuilder.components.length}/{MAX_COMPOSITE_COMPONENTS})
+                    </button>
+                    <button
+                      type="button"
+                      onClick={runComposite}
+                      className="mp-btn-primary bg-mercantil-orange hover:bg-mercantil-orange-deep text-xs px-5 py-2"
+                    >
+                      Evaluar combinado
                     </button>
                   </div>
                 </div>

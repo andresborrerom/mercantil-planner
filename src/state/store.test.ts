@@ -587,3 +587,120 @@ describe('store — showProposedAmcs', () => {
     expect(usePlannerStore.getState().showProposedAmcs).toBe(true);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Fase C.2b UI — setCustomView con CompositeView (AND/OR, ventanas per-component)
+// ---------------------------------------------------------------------------
+
+describe('store — setCustomView con CompositeView (Fase C.2b UI)', () => {
+  it('composite AND con 2 componentes válidos: pobla customView + analysis', () => {
+    const { setCustomView, ingestSimulation } = usePlannerStore.getState();
+    ingestSimulation(buildRawSim({ returnFn: () => 0 }));
+    setCustomView({
+      kind: 'composite',
+      id: 'dyn-composite-and-test',
+      label: 'composite and',
+      description: 'test and',
+      combinator: 'and',
+      components: [
+        {
+          id: 'c1',
+          label: 'c1',
+          description: 'c1',
+          subject: { kind: 'portfolioReturn', portfolio: 'A' },
+          mode: { kind: 'cumulativeReturnRange', minReturn: -0.05, maxReturn: 0.05 },
+          window: { startMonth: 1, endMonth: 12 },
+        },
+        {
+          id: 'c2',
+          label: 'c2',
+          description: 'c2',
+          subject: { kind: 'portfolioReturn', portfolio: 'B' },
+          mode: { kind: 'cumulativeReturnRange', minReturn: -0.05, maxReturn: 0.05 },
+          window: { startMonth: 1, endMonth: 24 },
+        },
+      ],
+      window: { startMonth: 1, endMonth: 24 },
+    });
+    const s = usePlannerStore.getState();
+    expect(s.activeViewId).toBe('dyn-composite-and-test');
+    expect(s.customView).not.toBeNull();
+    expect(s.customView!.id).toBe('dyn-composite-and-test');
+    expect(s.viewError).toBeNull();
+    expect(s.viewAnalysisA).not.toBeNull();
+    // Con retornos constantes 0, ambos componentes matchean en todos los paths → probability 1.
+    expect(s.viewAnalysisA!.evaluation.probability).toBe(1);
+  });
+
+  it('composite OR con ventanas distintas: unión de matched paths', () => {
+    const { setCustomView, ingestSimulation } = usePlannerStore.getState();
+    // Paths pares: retornos = 0. Paths impares: retornos = +0.10 (→ cum >5%).
+    ingestSimulation(buildRawSim({ returnFn: (p) => (p % 2 === 0 ? 0 : 0.1) }));
+    setCustomView({
+      kind: 'composite',
+      id: 'dyn-composite-or-test',
+      label: 'composite or',
+      description: 'test or',
+      combinator: 'or',
+      components: [
+        // c1: flat en 6m (matchea pares)
+        {
+          id: 'c1',
+          label: 'c1',
+          description: 'c1',
+          subject: { kind: 'portfolioReturn', portfolio: 'A' },
+          mode: { kind: 'cumulativeReturnRange', minReturn: -0.05, maxReturn: 0.05 },
+          window: { startMonth: 1, endMonth: 6 },
+        },
+        // c2: rally > 5% en 12m (matchea impares — con +10%/mes ya llegan)
+        {
+          id: 'c2',
+          label: 'c2',
+          description: 'c2',
+          subject: { kind: 'portfolioReturn', portfolio: 'A' },
+          mode: { kind: 'cumulativeReturnRange', minReturn: 0.05, maxReturn: null },
+          window: { startMonth: 1, endMonth: 12 },
+        },
+      ],
+      window: { startMonth: 1, endMonth: 12 },
+    });
+    const s = usePlannerStore.getState();
+    expect(s.viewError).toBeNull();
+    // OR cubre pares (c1) + impares (c2) → todos los paths.
+    expect(s.viewAnalysisA!.evaluation.probability).toBe(1);
+  });
+
+  it('composite con componente que requiere yields y no hay: viewError', () => {
+    const { setCustomView, ingestSimulation } = usePlannerStore.getState();
+    ingestSimulation(buildRawSim({ includeYieldPaths: false }));
+    setCustomView({
+      kind: 'composite',
+      id: 'dyn-composite-needs-yields',
+      label: 'x',
+      description: 'x',
+      combinator: 'and',
+      components: [
+        {
+          id: 'c1',
+          label: 'c1',
+          description: 'c1',
+          subject: { kind: 'portfolioReturn', portfolio: 'A' },
+          mode: { kind: 'cumulativeReturnRange', minReturn: null, maxReturn: 0.05 },
+          window: { startMonth: 1, endMonth: 12 },
+        },
+        {
+          id: 'c2',
+          label: 'c2',
+          description: 'c2',
+          subject: { kind: 'yield', key: 'TNX' },
+          mode: { kind: 'peakChange', minDelta: 0.01, maxDelta: null },
+          window: { startMonth: 1, endMonth: 12 },
+        },
+      ],
+      window: { startMonth: 1, endMonth: 12 },
+    });
+    const s = usePlannerStore.getState();
+    expect(s.viewError).toMatch(/yields/i);
+    expect(s.viewAnalysisA).toBeNull();
+  });
+});

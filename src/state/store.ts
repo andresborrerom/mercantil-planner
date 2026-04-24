@@ -44,7 +44,6 @@ import {
   type AnyView,
   type AsymmetricAnalysis,
   type EtfReturns,
-  type View,
   type ViewDataset,
   type YieldPaths,
 } from '../domain/views';
@@ -122,7 +121,7 @@ type PlannerState = {
   /** Id del preset de view activo, null = sin view. */
   activeViewId: string | null;
   /** View dinámico custom (creado por el builder). null si se usa un preset built-in. */
-  customView: View | null;
+  customView: AnyView | null;
   /** Análisis asimétrico del portafolio A bajo el view activo. */
   viewAnalysisA: AsymmetricAnalysis | null;
   /** Análisis asimétrico del portafolio B bajo el view activo. */
@@ -162,7 +161,7 @@ type PlannerState = {
    * evalúa inmediatamente contra la simulación actual. Para desactivar,
    * usar `setActiveView(null)`.
    */
-  setCustomView: (view: View) => void;
+  setCustomView: (view: AnyView) => void;
 
   /**
    * Toggle global de visibilidad de los AMCs propuestos. Al pasar a `false`
@@ -306,7 +305,7 @@ function computeConditionalBands(
  */
 function evaluateActiveView(
   activeViewId: string | null,
-  customView: View | null,
+  customView: AnyView | null,
   simA: FlowsOutput | null,
   simB: FlowsOutput | null,
   rawReturnsA: Float32Array | null,
