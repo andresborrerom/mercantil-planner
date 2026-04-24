@@ -293,30 +293,139 @@ export function computeValuePath(
 export interface RegimeStats {
   /** Retorno total acumulado sobre el período completo. (V_final / V_inicial) − 1. */
   readonly totalReturn: number;
-  /** Max drawdown: peor pérdida peak-to-trough sobre V. Negativo. */
+  /** Max drawdown: peor pérdida peak-to-trough sobre V. Negativo o 0. */
   readonly maxDrawdown: number;
   /** Valor final de la path. */
   readonly finalValue: number;
+  /**
+   * Meses desde el peak del max drawdown hasta el trough correspondiente.
+   * 0 si no hay drawdown (path monótona creciente).
+   */
+  readonly drawdownDurationMonths: number;
+  /**
+   * Meses desde el trough del max drawdown hasta volver a superar el peak
+   * previo. null si el régimen termina antes de que el portafolio recupere.
+   * 0 si no hubo drawdown.
+   */
+  readonly timeToRecoveryMonths: number | null;
+  /**
+   * Meses con retorno negativo, anualizado: (# meses neg) × 12 / total_meses.
+   * Normaliza para comparar regímenes de distinta duración.
+   */
+  readonly negativeMonthsPerYear: number;
+  /** Desvío estándar de los retornos mensuales × √12. */
+  readonly volatilityAnnualized: number;
+  /** Peor retorno mensual único dentro del régimen. */
+  readonly worstMonth: number;
+  /** Mejor retorno mensual único dentro del régimen. */
+  readonly bestMonth: number;
 }
 
-export function computeRegimeStats(valuePath: Float32Array): RegimeStats {
+/**
+ * Computa las 9 métricas resumen del régimen.
+ *
+ * Argumentos:
+ *   - `valuePath`: serie de valores incluyendo V[0] (longitud = meses + 1).
+ *   - `monthlyReturns`: serie de retornos (longitud = meses). Se pasa aparte
+ *     porque varias métricas operan sobre retornos directamente, no sobre V.
+ *
+ * Convenciones en edge-cases:
+ *   - Path monótona creciente → maxDrawdown = 0, drawdownDurationMonths = 0,
+ *     timeToRecoveryMonths = 0.
+ *   - Drawdown sin recuperación al cierre → timeToRecoveryMonths = null.
+ *   - Volatilidad con n = 1 → 0 (n-1 divisor saturado).
+ */
+export function computeRegimeStats(
+  valuePath: Float32Array,
+  monthlyReturns: Float32Array,
+): RegimeStats {
   if (valuePath.length === 0) {
     throw new Error('regimes: valuePath vacío');
   }
+  if (monthlyReturns.length === 0) {
+    throw new Error('regimes: monthlyReturns vacío');
+  }
+
   const initial = valuePath[0];
   const final = valuePath[valuePath.length - 1];
+
+  // --- Max drawdown + ubicación (peakIdx, troughIdx) ---
   let peak = valuePath[0];
+  let peakIdx = 0;
   let maxDD = 0;
+  let maxDDPeakIdx = 0;
+  let maxDDTroughIdx = 0;
   for (let t = 1; t < valuePath.length; t++) {
     const v = valuePath[t];
-    if (v > peak) peak = v;
+    if (v > peak) {
+      peak = v;
+      peakIdx = t;
+    }
     const dd = v / peak - 1;
-    if (dd < maxDD) maxDD = dd;
+    if (dd < maxDD) {
+      maxDD = dd;
+      maxDDPeakIdx = peakIdx;
+      maxDDTroughIdx = t;
+    }
   }
+
+  // --- Duración de la caída (peak → trough del max DD) ---
+  const drawdownDurationMonths =
+    maxDD === 0 ? 0 : maxDDTroughIdx - maxDDPeakIdx;
+
+  // --- Tiempo a recuperación (trough → superar el peak previo) ---
+  let timeToRecoveryMonths: number | null;
+  if (maxDD === 0) {
+    timeToRecoveryMonths = 0;
+  } else {
+    const priorPeak = valuePath[maxDDPeakIdx];
+    let recoveryIdx: number | null = null;
+    for (let t = maxDDTroughIdx + 1; t < valuePath.length; t++) {
+      if (valuePath[t] >= priorPeak) {
+        recoveryIdx = t;
+        break;
+      }
+    }
+    timeToRecoveryMonths =
+      recoveryIdx !== null ? recoveryIdx - maxDDTroughIdx : null;
+  }
+
+  // --- Meses en negativo + peor/mejor mes + media ---
+  let negCount = 0;
+  let worstMonth = Infinity;
+  let bestMonth = -Infinity;
+  let sum = 0;
+  for (let t = 0; t < monthlyReturns.length; t++) {
+    const r = monthlyReturns[t];
+    if (r < 0) negCount++;
+    if (r < worstMonth) worstMonth = r;
+    if (r > bestMonth) bestMonth = r;
+    sum += r;
+  }
+  const mean = sum / monthlyReturns.length;
+  const negativeMonthsPerYear =
+    (negCount * 12) / monthlyReturns.length;
+
+  // --- Volatilidad anualizada (sd × √12), sample variance ---
+  let sumSq = 0;
+  for (let t = 0; t < monthlyReturns.length; t++) {
+    const dev = monthlyReturns[t] - mean;
+    sumSq += dev * dev;
+  }
+  const denom = Math.max(1, monthlyReturns.length - 1);
+  const variance = sumSq / denom;
+  const volatilityAnnualized = Math.sqrt(variance) * Math.sqrt(12);
+
   return {
     totalReturn: initial > 0 ? final / initial - 1 : 0,
     maxDrawdown: maxDD,
     finalValue: final,
+    drawdownDurationMonths,
+    timeToRecoveryMonths,
+    negativeMonthsPerYear,
+    volatilityAnnualized,
+    worstMonth,
+    bestMonth,
   };
 }
 

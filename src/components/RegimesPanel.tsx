@@ -66,6 +66,19 @@ function formatPct(v: number, decimals = 1, signed = false): string {
   return `${prefix}${(v * 100).toFixed(decimals)}%`;
 }
 
+function formatMonths(v: number | null): string {
+  if (v === null) return 'no recuperó';
+  if (!Number.isFinite(v)) return '—';
+  if (v === 0) return '0';
+  if (v === 1) return '1 mes';
+  return `${v} meses`;
+}
+
+function formatMonthsPerYear(v: number): string {
+  if (!Number.isFinite(v)) return '—';
+  return `${v.toFixed(1)} meses/año`;
+}
+
 export default function RegimesPanel() {
   const portfolioA = usePlannerStore((s) => s.portfolioA);
   const portfolioB = usePlannerStore((s) => s.portfolioB);
@@ -114,10 +127,10 @@ export default function RegimesPanel() {
       return {
         chartData: data,
         stats: {
-          aHist: computeRegimeStats(pathA_hist),
-          aCurr: computeRegimeStats(pathA_curr),
-          bHist: computeRegimeStats(pathB_hist),
-          bCurr: computeRegimeStats(pathB_curr),
+          aHist: computeRegimeStats(pathA_hist, rA_hist),
+          aCurr: computeRegimeStats(pathA_curr, rA_curr),
+          bHist: computeRegimeStats(pathB_hist, rB_hist),
+          bCurr: computeRegimeStats(pathB_curr, rB_curr),
         } as Record<SeriesKey, RegimeStats>,
       };
     } catch (err) {
@@ -354,9 +367,19 @@ function StatsSubtable({
           </tr>
         </thead>
         <tbody>
+          {/* Resultado */}
           <StatsRow label="Retorno total" vCurr={formatPct(curr.totalReturn, 1, true)} vHist={formatPct(hist.totalReturn, 1, true)} />
-          <StatsRow label="Max drawdown" vCurr={formatPct(curr.maxDrawdown, 1)} vHist={formatPct(hist.maxDrawdown, 1)} />
           <StatsRow label="Valor final" vCurr={formatUsd(curr.finalValue)} vHist={formatUsd(hist.finalValue)} />
+          {/* Profundidad */}
+          <StatsRow label="Max drawdown" vCurr={formatPct(curr.maxDrawdown, 1)} vHist={formatPct(hist.maxDrawdown, 1)} />
+          <StatsRow label="Duración caída" vCurr={formatMonths(curr.drawdownDurationMonths)} vHist={formatMonths(hist.drawdownDurationMonths)} />
+          <StatsRow label="Peor mes" vCurr={formatPct(curr.worstMonth, 2, true)} vHist={formatPct(hist.worstMonth, 2, true)} />
+          {/* Recuperación */}
+          <StatsRow label="Tiempo a recuperación" vCurr={formatMonths(curr.timeToRecoveryMonths)} vHist={formatMonths(hist.timeToRecoveryMonths)} />
+          <StatsRow label="Meses en negativo" vCurr={formatMonthsPerYear(curr.negativeMonthsPerYear)} vHist={formatMonthsPerYear(hist.negativeMonthsPerYear)} />
+          {/* Variabilidad */}
+          <StatsRow label="Volatilidad anualizada" vCurr={formatPct(curr.volatilityAnnualized, 1)} vHist={formatPct(hist.volatilityAnnualized, 1)} />
+          <StatsRow label="Mejor mes" vCurr={formatPct(curr.bestMonth, 2, true)} vHist={formatPct(hist.bestMonth, 2, true)} />
         </tbody>
       </table>
     </div>

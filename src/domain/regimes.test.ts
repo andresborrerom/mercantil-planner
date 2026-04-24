@@ -180,19 +180,87 @@ describe('regimes — computeValuePath y computeRegimeStats', () => {
     // Path: 100 → 110 → 99 → 105. Peak = 110, trough después = 99 → DD = 99/110 - 1 = -0.1.
     const returns = new Float32Array([0.1, -0.1, 0.0606]); // cum ~= 5%
     const path = computeValuePath(100, returns);
-    const stats = computeRegimeStats(path);
+    const stats = computeRegimeStats(path, returns);
     expect(stats.finalValue).toBeCloseTo(path[path.length - 1], 5);
     expect(stats.totalReturn).toBeCloseTo(stats.finalValue / 100 - 1, 5);
     expect(stats.maxDrawdown).toBeLessThanOrEqual(0);
     expect(stats.maxDrawdown).toBeCloseTo(99 / 110 - 1, 2); // ≈ -0.10
   });
 
-  it('stats: path monótona creciente → maxDrawdown = 0', () => {
+  it('stats: path monótona creciente → maxDrawdown = 0, drawdownDuration = 0, timeToRecovery = 0', () => {
     const returns = new Float32Array([0.01, 0.02, 0.01]);
     const path = computeValuePath(100, returns);
-    const stats = computeRegimeStats(path);
+    const stats = computeRegimeStats(path, returns);
     expect(stats.maxDrawdown).toBe(0);
+    expect(stats.drawdownDurationMonths).toBe(0);
+    expect(stats.timeToRecoveryMonths).toBe(0);
     expect(stats.totalReturn).toBeGreaterThan(0);
+  });
+
+  it('stats: drawdownDurationMonths = meses del peak al trough del max DD', () => {
+    // Path: 100 → 105 → 102 → 90 → 95 → 120. Peak = 105 (t=1), trough del max DD = 90 (t=3).
+    // drawdown duration = 3 - 1 = 2 meses.
+    const path = new Float32Array([100, 105, 102, 90, 95, 120]);
+    const returns = new Float32Array([0.05, -0.0286, -0.1176, 0.0556, 0.2632]);
+    const stats = computeRegimeStats(path, returns);
+    expect(stats.drawdownDurationMonths).toBe(2);
+    // Max DD peak at t=1 (V=105), trough at t=3 (V=90). DD = 90/105 - 1 ≈ -0.143.
+    expect(stats.maxDrawdown).toBeCloseTo(90 / 105 - 1, 3);
+  });
+
+  it('stats: timeToRecoveryMonths = meses hasta superar el peak previo', () => {
+    // Path: 100 → 105 → 90 → 95 → 107. Peak = 105 (t=1), trough = 90 (t=2).
+    // V[t=4] = 107 >= 105 → recovery at t=4. timeToRecovery = 4 - 2 = 2.
+    const path = new Float32Array([100, 105, 90, 95, 107]);
+    const returns = new Float32Array([0.05, -0.1429, 0.0556, 0.1263]);
+    const stats = computeRegimeStats(path, returns);
+    expect(stats.timeToRecoveryMonths).toBe(2);
+  });
+
+  it('stats: timeToRecoveryMonths = null cuando el régimen termina sin recuperar', () => {
+    // Path: 100 → 105 → 90 → 95 → 100. V[final] = 100 < 105. No recuperó.
+    const path = new Float32Array([100, 105, 90, 95, 100]);
+    const returns = new Float32Array([0.05, -0.1429, 0.0556, 0.0526]);
+    const stats = computeRegimeStats(path, returns);
+    expect(stats.timeToRecoveryMonths).toBeNull();
+  });
+
+  it('stats: negativeMonthsPerYear normaliza al año', () => {
+    // 12 meses, 6 negativos → 6/12 × 12 = 6 meses/año.
+    const returns = new Float32Array([
+      -0.01, -0.01, -0.01, -0.01, -0.01, -0.01,
+      0.01, 0.01, 0.01, 0.01, 0.01, 0.01,
+    ]);
+    const path = computeValuePath(100, returns);
+    const stats = computeRegimeStats(path, returns);
+    expect(stats.negativeMonthsPerYear).toBe(6);
+
+    // 6 meses, 2 negativos → 2/6 × 12 = 4 meses/año.
+    const returns6 = new Float32Array([-0.01, -0.01, 0.01, 0.01, 0.01, 0.01]);
+    const path6 = computeValuePath(100, returns6);
+    const stats6 = computeRegimeStats(path6, returns6);
+    expect(stats6.negativeMonthsPerYear).toBe(4);
+  });
+
+  it('stats: worstMonth, bestMonth, volatilityAnnualized', () => {
+    const returns = new Float32Array([0.05, -0.10, 0.03, -0.02, 0.08]);
+    const path = computeValuePath(100, returns);
+    const stats = computeRegimeStats(path, returns);
+    expect(stats.worstMonth).toBeCloseTo(-0.10, 5);
+    expect(stats.bestMonth).toBeCloseTo(0.08, 5);
+    // Vol anualizada = sd(returns) × √12. sd con n-1.
+    // mean = 0.008, devs = 0.042, -0.108, 0.022, -0.028, 0.072
+    // sumSq ≈ 0.001764 + 0.011664 + 0.000484 + 0.000784 + 0.005184 = 0.01988
+    // var = 0.01988 / 4 = 0.00497; sd ≈ 0.0705; vol_annual = 0.0705 × 3.464 ≈ 0.2441
+    expect(stats.volatilityAnnualized).toBeGreaterThan(0.2);
+    expect(stats.volatilityAnnualized).toBeLessThan(0.3);
+  });
+
+  it('stats: vol = 0 cuando todos los retornos son iguales', () => {
+    const returns = new Float32Array([0.01, 0.01, 0.01, 0.01]);
+    const path = computeValuePath(100, returns);
+    const stats = computeRegimeStats(path, returns);
+    expect(stats.volatilityAnnualized).toBe(0);
   });
 });
 

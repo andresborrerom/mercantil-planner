@@ -2288,3 +2288,81 @@ Quedan:
 - Deploy automático en `andresborrerom.github.io/mercantil-planner/` tras el push.
 - Panel nuevo vive colapsado por default — asesor lo abre a demanda.
 
+---
+
+## 2026-04-23 — Fase C.3.1: Enriquecimiento de stats de regímenes (6 métricas nuevas)
+
+Continuación directa de Fase C.3 (cerrada la misma sesión). Usuario pidió métricas adicionales para la tabla de stats, "así no salgan en las gráficas específicamente" — es decir, profundizar la narrativa cuantitativa sin cargar el chart visual.
+
+### Métricas agregadas (6, pasando de 3 a 9 totales por portafolio × modo)
+
+Las 3 existentes: **Retorno total · Valor final · Max drawdown**.
+
+**Pedidas por el usuario:**
+
+1. **Duración de la caída** — meses desde el peak del max DD hasta el trough. Captura "qué tan rápido fue el golpe" vs "goteo prolongado".
+2. **Tiempo a recuperación** — meses desde el trough hasta volver a superar el peak previo. `null` si el régimen termina antes (se muestra como "no recuperó"). Complementa max DD: una caída profunda que se recupera rápido es muy distinta de una caída moderada pero persistente.
+3. **Meses en negativo por año** — `(# meses neg) × 12 / meses_regimen`. Normaliza para comparar regímenes de distinta duración (ej. Crisis 2008 con 18 meses vs Inflación 2022 con 10 meses).
+
+**Sugeridas por Claude y aprobadas:**
+
+4. **Volatilidad anualizada** — `sd(retornos) × √12`, sample variance (divisor n−1). Complemento clásico del retorno: "¿qué tan accidentado fue el camino?". Ulcer Index se descartó por ser demasiado técnico.
+5. **Peor mes** — min de retornos mensuales. Anécdota concreta para la conversación con cliente ("en marzo de 2020 cayó X% en un mes").
+6. **Mejor mes** — max de retornos mensuales. Counterpart: los rebotes también existen dentro del régimen y son parte del relato.
+
+### Implementación
+
+**`src/domain/regimes.ts`:**
+
+- `RegimeStats` extendido con 6 campos nuevos.
+- `computeRegimeStats(valuePath, monthlyReturns)` — segundo argumento obligatorio ahora. Varias métricas (vol, negativeMonths, worst/best) operan sobre retornos directamente.
+- Single-pass sobre `valuePath` trackea: peak, peakIdx, maxDD, maxDDPeakIdx, maxDDTroughIdx. Eso da drawdownDuration.
+- Segundo loop corto tras el trough busca recovery — `null` si no hay.
+- Pass sobre `monthlyReturns` acumula: # negativos, worstMonth, bestMonth, sum (para mean).
+- Pass final de varianza: sample variance con divisor `max(1, n-1)` (guarda contra n=1 degenerado).
+
+**Convenciones en edge-cases:**
+
+- Path monótona creciente → maxDD=0 ⇒ drawdownDuration=0, timeToRecovery=0 (coherente con "no hubo drawdown").
+- Drawdown sin recuperación al cierre del régimen → timeToRecovery=null (UI muestra "no recuperó").
+- Retornos constantes → vol=0.
+
+### UI (`src/components/RegimesPanel.tsx`)
+
+- `StatsSubtable` ahora renderiza 9 filas en lugar de 3. Mismas 2 columnas (Tasas actuales | Tasas del período).
+- Nuevos formatters: `formatMonths(v | null)` (muestra "no recuperó" para null, "0" / "1 mes" / "N meses" de lo contrario); `formatMonthsPerYear(v)` (ej. "4.5 meses/año").
+- Signed % para Peor mes y Mejor mes (siempre con + o −).
+- Orden conceptual: Resultado (retorno, valor final) → Profundidad (max DD, duración, peor mes) → Recuperación (tiempo, meses neg) → Variabilidad (vol, mejor mes).
+
+### Tests nuevos (+6, total 278/278)
+
+1. Drawdown duration: path sintética `100→105→102→90→95→120`, peak en t=1, trough en t=3 → duration = 2 meses.
+2. Time to recovery: path con recovery al cierre → número correcto de meses.
+3. Time to recovery = null: path que no recupera dentro del régimen.
+4. Negative months per year: normalización correcta para regímenes de 12 y 6 meses.
+5. Worst/best month + volatilidad anualizada dentro del rango esperado.
+6. Vol = 0 cuando retornos son todos iguales.
+
+Los 3 tests existentes (totalReturn, maxDrawdown, finalValue) también se actualizaron para pasar `monthlyReturns` como segundo argumento.
+
+### Verificación
+
+- `npm test` → **278/278** (272 + 6 nuevos).
+- `npm run build` → limpio en ~45s. Bundle sin cambio material (formatters + filas de tabla son costo despreciable).
+
+### Pendientes actualizados
+
+Quedan:
+- Modo `synchronizedDirection` (estanflación real mes a mes).
+- Instructivo partes 2/3/4b.
+- E2E Playwright.
+- Audit UX móvil.
+- Migración a repo privado Mercantil AWM.
+- `mercantil-planner-build/` sync bajo demanda.
+- Evolución C.3: régimen custom por rango de fechas + permitir flujos durante el replay.
+
+### Estado al cierre
+
+- **278/278 tests · build limpio · Fase C.3 ampliada con stats adicionales.**
+- Tabla de regímenes ahora tiene densidad informativa plena — el asesor puede contar la historia completa del régimen (qué tan profundo, qué tan largo, qué tan accidentado, mejor/peor mes).
+
