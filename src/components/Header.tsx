@@ -55,7 +55,12 @@ export default function Header() {
 
         <div className="flex items-center gap-2">
           <ThemeToggle />
-          <button className="mp-btn-outline hidden sm:inline-flex">
+          <button
+            type="button"
+            className="mp-btn-outline hidden sm:inline-flex"
+            onClick={() => window.open(`${import.meta.env.BASE_URL}instructivo/`, '_blank', 'noopener')}
+            title="Abrir el instructivo del asesor en una pestaña nueva"
+          >
             Guía del asesor
           </button>
           <button className="mp-btn-primary">

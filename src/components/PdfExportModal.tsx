@@ -7,6 +7,7 @@ import {
   pdfFileName,
   type PdfFormInputs,
 } from '../pdf/state/serialize';
+import type { PdfSimulationData } from '../pdf/projections/types';
 import type { PdfLocale, PdfVersion, WealthBucket } from '../pdf/state/types';
 
 type Props = {
@@ -74,8 +75,23 @@ export default function PdfExportModal({ open, onClose }: Props) {
         state.client.bucket,
         state.version,
       );
+      const sim = snapshot.simA;
+      if (!sim || !sim.values || !sim.netContributions) {
+        throw new Error(
+          'No hay simulación disponible. Ejecute Simular antes de generar el PDF.',
+        );
+      }
+      const nPaths = sim.values.length / (snapshot.plan.horizonMonths + 1);
+      const simulationData: PdfSimulationData = {
+        valuesA: sim.values,
+        netContributionsA: sim.netContributions,
+        nPaths,
+        horizonMonths: snapshot.plan.horizonMonths,
+        mode: snapshot.plan.mode,
+        inflationPct: snapshot.plan.inflationPct,
+      };
       const { generateAndDownloadPdf } = await import('../pdf/download');
-      await generateAndDownloadPdf(state, { filename });
+      await generateAndDownloadPdf(state, simulationData, { filename });
       onClose();
     } catch (err) {
       console.error('[PdfExportModal] generación falló', err);

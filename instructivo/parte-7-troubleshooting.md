@@ -71,6 +71,50 @@ Verificá que la extensión del archivo descargado sea `.xlsx` (no `.xls` ni `.x
 
 Si el archivo abre pero está corrupto o incompleto, probablemente hubo un error de memoria durante la exportación. Intentá reducir el número de paths exportados (por default son los primeros 500 — puede que tu horizonte muy largo llene la hoja). Si persiste, reportá el bug.
 
+## Problemas con el plan personal de inversión (PDF)
+
+### "El botón 'Generar plan personal de inversión' está gris y no responde"
+
+Está bloqueado intencionalmente. La herramienta no permite generar el PDF si no hay simulación corrida — la sección E (Proyecciones) del documento depende de los datos de la simulación. El tooltip del botón debería aclarar *"Ejecute primero una simulación"*. Solución: click en *Simular* y esperar a que termine; el botón se habilita automáticamente.
+
+### "Hago click en 'Generar PDF' y nada pasa"
+
+Posibles causas, en orden de probabilidad:
+
+1. **El form tiene campos requeridos vacíos**. Cliente y Asesor son obligatorios. Si están en blanco, el navegador puede bloquear el submit silenciosamente. Revisá que ambos tengan texto.
+2. **La descarga del chunk del PDF tarda en la primera generación**. La librería `react-pdf` y `pdf-lib` pesan ~1,8 MB combinados y se descargan en *lazy load* la primera vez que se usa el botón. En conexiones lentas puede tomar 5-15 segundos. La segunda generación es instantánea (el navegador cachea el chunk).
+3. **Bloqueador de pop-ups o ad-blocker**. Algunos bloqueadores agresivos interceptan la descarga de archivos generados client-side. Probar en una pestaña incógnito sin extensiones.
+
+Si el modal se cierra pero no aparece archivo en la carpeta de descargas, abrí F12 → pestaña Console y buscá errores en rojo durante el click de Generar.
+
+### "El PDF se descargó pero al abrirlo está en blanco / corrupto"
+
+Lo más probable: el navegador descargó parcialmente el archivo. Verificá que el tamaño del archivo sea > 18 KB (un PDF válido pesa entre 18 y 25 KB con la sección E completa). Si pesa < 5 KB, está incompleto — borralo y generá de nuevo.
+
+Si el archivo pesa lo correcto pero igual abre vacío en Adobe Reader, intentá abrirlo con el visor built-in de Chrome (arrastrar el archivo a una pestaña vacía). Si en Chrome se ve bien, el problema está en la versión local de Adobe Reader; actualizar.
+
+### "El nombre del archivo es raro — sin guiones, con caracteres extraños"
+
+La convención es `cliente-bucket[-ejec].pdf` con el slug del cliente en minúscula sin acentos ni espacios. Si el nombre del cliente tiene caracteres especiales (ñ, á, comillas, símbolos), el motor los normaliza a ASCII. Si el cliente se llama *"Núñez & Asociados"*, el slug resultante es `nunez-asociados` y el archivo será `nunez-asociados-longevity.pdf`. Es comportamiento esperado, no bug.
+
+### "Importé un PDF de sesión anterior y la herramienta no rehidrató el estado"
+
+La importación drag-and-drop está en desarrollo al cierre del 2026-05-06. Mientras esa feature no esté en producción, la rehidratación se hace manualmente con el botón *Copiar config* / *Pegar config JSON* del ExportBar. Esta sección se actualizará cuando la importación drag-and-drop esté disponible.
+
+## Problemas de acceso (auth)
+
+### "No puedo entrar a la herramienta — me pide login"
+
+Antes de la activación del auth con Cloudflare Access, la herramienta es de acceso libre. Si aparece una pantalla de login, ya está activado el auth y el asesor necesita estar en la lista de emails autorizados.
+
+1. Verificá que el email con el que estás intentando entrar es el mismo que tu cuenta institucional Mercantil AWM.
+2. Si el email es correcto y aún así no entrás, contactá al administrador del despliegue (Pocho) para que verifique la lista de Cloudflare Access.
+3. Si el email no llega con el código OTP, verificá la carpeta de spam.
+
+### "Me autenticó la primera vez pero después me pide login todos los días"
+
+Cloudflare Access tiene un timeout de sesión configurable. Si está en el valor mínimo, puede pedir auth diariamente. Esta sección se actualizará con los detalles operativos cuando el feature esté en producción.
+
 ## Reportar un bug
 
 Si encontrás algo que claramente anda mal — la herramienta cuelga, arroja un error inesperado, muestra un número que no tiene sentido — mandame un mail o WhatsApp con:

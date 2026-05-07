@@ -2,8 +2,11 @@ import { Document, Page, StyleSheet } from '@react-pdf/renderer';
 
 import { CoverSection } from './sections/A_Cover';
 import { ExecutiveSummarySection } from './sections/B_ExecutiveSummary';
+import { ProjectionsSection } from './sections/E_Projections';
 import { PdfFooter } from './components/PdfFooter';
+import { buildProjectionsData } from './projections/buildProjectionsData';
 import { colors } from './theme/colors';
+import type { PdfSimulationData } from './projections/types';
 import type { PdfStateContainer } from './state/types';
 
 // IMPORTANTE: el caller debe asegurar `await i18n.changeLanguage(state.locale)`
@@ -24,6 +27,16 @@ export type MercantilPdfPlaceholders = {
   nextReviewDate?: string;
 };
 
+export type MercantilPdfOptions = {
+  /**
+   * Datos de simulación cruda. Si están presentes se renderiza la sección E
+   * (Proyecciones). Si no, se omite — útil para previews del skeleton sin
+   * necesidad de correr el motor.
+   */
+  simulationData?: PdfSimulationData;
+  placeholders?: MercantilPdfPlaceholders;
+};
+
 /**
  * Factory que retorna directamente un <Document> de @react-pdf/renderer.
  * Llamarla en lugar de usarla como componente: `pdf()` exige un
@@ -31,9 +44,12 @@ export type MercantilPdfPlaceholders = {
  */
 export function createMercantilPdfDocument(
   state: PdfStateContainer,
-  placeholders?: MercantilPdfPlaceholders,
+  options: MercantilPdfOptions = {},
 ) {
+  const { simulationData, placeholders } = options;
   const docTitle = `${state.client.name} — Mercantil AWM (${state.client.bucket})`;
+  const projections = simulationData ? buildProjectionsData(simulationData) : null;
+
   return (
     <Document
       title={docTitle}
@@ -51,6 +67,12 @@ export function createMercantilPdfDocument(
         <ExecutiveSummarySection state={state} placeholders={placeholders} />
         <PdfFooter sessionId={state.sessionId} />
       </Page>
+      {projections ? (
+        <Page size="A4" style={styles.page}>
+          <ProjectionsSection state={state} data={projections} />
+          <PdfFooter sessionId={state.sessionId} />
+        </Page>
+      ) : null}
     </Document>
   );
 }

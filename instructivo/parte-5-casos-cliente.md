@@ -23,6 +23,8 @@ Ingeniero de 40 años, ingreso estable, sin deudas significativas. Tiene USD 100
 - **Portafolio A:** Signature Balanceado
 - **Portafolio B:** Signature Crecimiento
 
+![Stats panel del caso Pablo (Balanceado vs Crecimiento, 25 años, modo real, aporte 2k+3%) con TWR/XIRR/MDD/Vol/Valor final/Probabilidades de shortfall y ruina](assets/parte-5-pablo-stats.png)
+
 ### Lectura — Familia A (¿llega el plan a la meta?)
 
 La métrica central para Pablo es la **probabilidad de shortfall** — es decir, cuál es la probabilidad de que después de 25 años aportando religiosamente, termine con menos capital del que puso. Un shortfall alto es una señal de que el perfil de riesgo no está alineado con el horizonte.
@@ -73,6 +75,8 @@ Este es el caso más sutil de la cartera: el cliente que cree que no tiene riesg
 - **Portafolio B:** Signature Crecimiento
 
 > **Nota técnica para el equipo comercial:** el Custom mix CashST 50% + GlFI 50% es la representación más cercana disponible hoy en la UI para simular un portafolio "mitad cash mitad FIXED6". Una mejora futura sería agregar un AMC "CDT-Proxy" con 50% CashST + 50% FIXED6 puro, para tener una entrada directa desde el selector. Por ahora, el Custom mix propuesto es suficientemente preciso y la volatilidad esperada queda por debajo del 3% anual — indistinguible en la práctica de un CDT renovado.
+
+![Stats panel del caso Diana (CDT-Proxy custom vs Crecimiento, 15 años, modo real, sin flujos): TWR ~4% vs ~8%, MDD -5% vs -40%, valor final USD 372K vs 644K — la asimetría central de la conversación](assets/parte-5-diana-stats.png)
 
 ### Lectura — Familia A (¿llega el plan a la meta?)
 
@@ -132,6 +136,8 @@ Recientemente jubilada, sin ingresos laborales. Acumuló USD 500.000 durante su 
 - **Regla de flujo:** retiro mensual USD 4.000, sin crecimiento adicional (el modo real ya lo infla), mes inicio 1, sin fecha fin
 - **Portafolio A:** Signature Conservador
 - **Portafolio B:** Signature Balanceado
+
+![Stats panel del caso Marta (Conservador vs Balanceado, 25 años decumulación, retiro 4k mensual real): notar la probabilidad de ruina — el termómetro central del plan](assets/parte-5-marta-stats.png)
 
 ### Lectura — Familia A (¿llega el plan a la meta?)
 
@@ -225,6 +231,8 @@ Esto no se modela en una sola corrida, pero la herramienta permite analizarlo pe
 
 ### Lectura combinada — Familia A
 
+![Stats panel de Carlos en una corrida representativa (Equity-tilted vs Balanceado, 30 años, capital USD 2M, transferencia única USD 500K en mes 120): el contraste entre ambos portafolios sobre el horizonte completo, antes de decidir si vale la sofisticación de las 3 fases](assets/parte-5-carlos-stats.png)
+
 Tras las tres corridas, el asesor tiene:
 
 - Capital mediano al año 7 (pre-derisking): `[USD A]`
@@ -265,6 +273,27 @@ Este caso tiene tres puntos de revisión naturales que coinciden con los cambios
 
 ---
 
+---
+
+## Cierre de cada caso con el PDF "Generar plan personal de inversión"
+
+Para los cuatro casos anteriores, el cierre operativo de la reunión es el mismo: el asesor genera el PDF de cierre con la configuración acordada y se lo entrega al cliente. La diferencia entre casos está en el bucket Wealth Way que se selecciona y, marginalmente, en la versión (Completa o Ejecutiva).
+
+| Caso | Bucket sugerido | Versión sugerida | Comentario |
+|---|---|---|---|
+| **Pablo** (acumulación 25 años) | Longevidad | Completa | Documento de seguimiento — Pablo va a volver a la herramienta en cada cumpleaños del plan. |
+| **Diana** (CDT, 15 años) | Longevidad | Completa + Ejecutiva | Diana es escéptica del mercado — la versión Completa documenta exhaustivamente el costo de oportunidad; la Ejecutiva es la que realmente lee. |
+| **Marta** (decumulación 25 años) | Longevidad | Completa | El primer año en decumulación es crítico; la Completa entrega los números necesarios para la conversación trimestral del primer año. |
+| **Carlos** (legado 30 años, mixto) | Legado | Completa | El caso más sofisticado. La versión Completa documenta las tres fases y el comparativo contra Balanceado continuo. Tres PDFs adicionales si Carlos requiere también los buckets de Liquidez y Longevidad. |
+
+> **Carta personalizada del asesor**: el modal del PDF tiene un campo opcional de hasta 600 caracteres para una carta que aparece en la portada (sección A2). Para clientes nuevos, el asesor escribe ahí un mensaje breve que ancle la decisión central tomada en la reunión — *"Diana, este documento refleja la conversación que tuvimos sobre [decisión X]. Quedan documentados tanto el plan elegido como las alternativas que descartamos y por qué. Cualquier inquietud, me contacta antes de la próxima reunión."* No tiene que ser largo; tiene que ser memorable.
+
+> **Caso Carlos — múltiples PDFs**: si Carlos también tiene capital en bucket Liquidez o Longevidad además del Legado, el asesor genera **un PDF por bucket**: `carlos-legacy.pdf`, `carlos-longevity.pdf`, `carlos-liquidity.pdf`. Cada uno con su propio plan, sus propias decisiones documentadas, su propia conversación. El cliente termina con tres PDFs en su archivo, no con uno consolidado — esto está alineado con el framework UBS Wealth Way *"un bucket, una conversación"*.
+
+[GIF — duración 20 s. Caso Pablo cerrando la reunión: simulación corrida → click *Generar plan personal de inversión* → modal abierto → *Cliente: Pablo*, *Asesor: [tu nombre]*, *Bucket: Longevidad*, *Versión: Completa*, *Idioma: ES*, carta personalizada *"Pablo — adjunto su plan a 25 años con la decisión de Crecimiento como portafolio principal. Próxima revisión en 12 meses."* → click *Generar PDF* → descarga del archivo `pablo-longevity.pdf`.]
+
+---
+
 ## Próximo paso
 
 Este borrador es la versión narrativa completa de los cuatro casos. Los valores numéricos `[entre_corchetes]` se pinean después corriendo los casos en la herramienta real — el asesor configura cada caso exactamente como está documentado y toma screenshots de los resultados. Esos screenshots se vuelven el material visual del PDF final.
@@ -275,4 +304,6 @@ Pendientes para cerrar esta parte del instructivo:
 2. Pinear los valores `[X]` en el texto con los números reales.
 3. Capturar screenshots del config + del fan chart + del stats panel para cada caso.
 4. Capturar GIFs específicos donde el movimiento cuenta (ej. slider de ventana en Pablo, comparación 0-10 vs 10-30 en Carlos).
-5. Revisión editorial final del asesor senior.
+5. Capturar el GIF de cierre con PDF para el caso Pablo (referencia arriba).
+6. Generar muestras de los cuatro PDFs (`pablo-longevity.pdf`, `diana-longevity.pdf`, `marta-longevity.pdf`, `carlos-legacy.pdf`) y guardarlas como anexos del instructivo.
+7. Revisión editorial final del asesor senior.

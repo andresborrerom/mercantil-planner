@@ -2736,4 +2736,170 @@ Backlog Fase E:
 - Adenda al dossier integra los 3 puntos de feedback de Pocho con calidad y profundidad equivalentes al dossier original.
 - Visor HTML local entregado para que Pocho navegue todo el material del proyecto en un sidebar único.
 
+---
+
+## 2026-05-06 — Fase D.3: Sección E del PDF (Proyecciones) cableada con datos reales
+
+Sesión interactiva con Pocho. Implementación de la sección E del PDF — el corazón del documento según dossier 9.E. La sección consume los datos crudos de la simulación del store (no del state container, que mantiene su rol de input determinístico) y rinde fan chart SVG + tabla tail risk a 5/10/20/30 años + caja narrativa modelo de la adenda 10.1. Branch `feature/pdf-cierre`, sin tocar `main`.
+
+### Decisiones de producto consolidadas (Pocho 2026-05-06)
+
+- **Bloqueo del botón "Generar plan personal de inversión"** en `ExportBar` cuando `!hasSim`, con tooltip "Ejecute primero una simulación". Sin simulación no hay sección E, así que no hay PDF.
+- **Sección E muestra solo Portafolio A** ("recomendado"). El comparativo A vs B con fan chart paralelo va en **D4** del dossier — agendado al pipeline.
+- **Eje Y**: respeta `plan.mode`. Default nominal. Nota al pie aclara régimen y, si es real, la inflación anual usada.
+- **Línea de capital aportado neto** incluida en el fan chart — Pocho la valoró específicamente para mostrar visualmente cómo en escenarios "debajo del colchón" en longevity el cliente se queda sin dinero (cruce con $0 / con la línea de aportes).
+- **Anchors tail risk**: `[60, 120, 240, 360]` (5/10/20/30 años), filtrados dinámicamente por `plan.horizonMonths`. El horizonte final del plan SIEMPRE se incluye como último anchor — si no es un default redondo, se agrega.
+- **Versión "ejecutiva" incluye sección E completa** — la modularidad de F/G/K no aplica a E.
+- **Namespace i18n**: `pdf.projections.*`. ES/EN finales, FR/DE prefijados con `[BROUILLON]` / `[ENTWURF]` hasta revisión nativa.
+
+### Bloque 1 — Helper puro `buildProjectionsData` + tests (+21)
+
+`src/pdf/projections/buildProjectionsData.ts` aísla toda la lógica numérica:
+
+- `selectAnchors(horizonMonths, defaults)`: filtra los 4 defaults `[60, 120, 240, 360]` a `≤ horizonMonths` y agrega el horizonte final como último anchor (con dedup). Garantiza que la última columna de la tabla SIEMPRE sea el cierre del plan.
+- `deflateValues` / `deflateSeries`: aplican `(1 + infl/100)^(t/12)` para pasar nominal → real cuando `plan.mode === 'real'`.
+- `buildProjectionsData(sim)`: produce `{ bands, netContributions, tailRisk, narrative, horizonMonths, mode }` con todo el régimen ya aplicado. Reusa `computeFanChartBands` y `computeTailRiskAtHorizons` del motor.
+
+`narrative` extrae los números necesarios para el párrafo modelo de la adenda 10.1 (P5/mediana/P95/CVaR_5 al cierre del plan + delta porcentual del CVaR_5 vs mediana).
+
+**+21 tests** (8 selectAnchors + 3 deflateValues + 2 deflateSeries + 8 buildProjectionsData) — cubren defaults, horizonte intermedio, horizonte corto, deflación con factor temporal correcto, monotonía cross-sectional `p5 ≤ p10 ≤ … ≤ p95`, invariante `cvar5 ≤ p5 ≤ p95 ≤ cvar95`, narrative en cierre del plan, validación de shapes.
+
+### Bloque 2 — Fan chart SVG nativo (`SvgFanChart.tsx`)
+
+Dibuja con primitivas `Svg`, `Polygon`, `Polyline`, `Line`, `G`, `Text` de `@react-pdf/renderer` (NO Recharts — Recharts es DOM only).
+
+- Tres bandas de incertidumbre con fillOpacity progresivo (0.12 → 0.18 → 0.28): P5–P95 (clara) → P10–P90 → P25–P75 (más oscura).
+- Mediana sólida `colors.accent` strokeWidth 1.4.
+- Capital aportado neto dashed `strokeDasharray="3 3"` strokeWidth 0.9 — visualiza el cruce con el saldo del plan.
+- Y-ticks: 5 niveles equiespaciados con formatter compacto (`$1.5M`, `$250k`, `$80`).
+- X-ticks: cada 1/2/5/10 años según el horizonte total. Siempre se incluye el horizonte final del plan como último tick.
+- Y-max calculado con headroom 8% sobre `max(p95, contribuciones)` — la línea de aportes nunca queda fuera del marco.
+- Estilo de labels SVG vía `style={{ fontFamily, fontSize }}` — los SVGTextProps de @react-pdf no permiten `fontFamily` como prop directo (TS estricto lo rechaza), va en `style`.
+
+### Bloque 3 — Sección E (`E_Projections.tsx`)
+
+Una página A4 por debajo del resumen ejecutivo. Estructura visual:
+
+1. **Header** (cliente) + **Title** "Proyecciones".
+2. **Subtitle** dinámico — "Trayectoria patrimonial proyectada del Portafolio A a {{years}} años, con bandas de incertidumbre construidas a partir de 5 000 escenarios históricos."
+3. **Fan chart SVG** 482×220 pt.
+4. **Mode note** italic — explica si valores son nominales o reales (con inflación).
+5. **Leyenda** con 3 swatches (sólido / banda / dashed) + labels.
+6. **"Cómo leer este gráfico"** — párrafo educativo que explica bandas, mediana y la lectura del cruce con el capital aportado neto.
+7. **Tabla tail risk** a 5/10/20/30 años (filtrados): filas P95, CVaR_95, Mediana (emphasized), P5, CVaR_5. Footnote con el diferenciador #6: "*Los percentiles indican dónde empieza la cola; el CVaR (Expected Shortfall) indica qué tan profunda es en promedio. La industria muestra el percentil; Mercantil entrega ambos.*"
+8. **Caja narrativa** (accent soft + border-left) con el párrafo modelo de la adenda 10.1: *"Su plan tiene una probabilidad del 90% de terminar entre $X y $Y a 20 años. En el 5% de escenarios menos favorables, el resultado promedio es $Z (≈ −W% sobre el escenario central)."* Números formateados con `Intl.NumberFormat` localizado.
+
+Total estimado: ~620 pt verticales, encaja cómodamente en una A4 (746 pt usables tras márgenes).
+
+### Bloque 4 — Cableado end-to-end
+
+- **`MercantilPdf.tsx`**: refactor de la firma a `createMercantilPdfDocument(state, { simulationData?, placeholders? })`. Si `simulationData` está presente, agrega tercera página con `<ProjectionsSection>`. Sin él, omite la página (preserva preview del skeleton sin necesidad de motor).
+- **`download.ts`**: `generateAndDownloadPdf(state, simulationData, opts)` — `simulationData` ahora es argumento required. **Decisión clave**: NO se embebe en el state container porque son ~7 MB de Float32Array determinísticos dado seed + portfolio + plan. El planner los regenera al rehidratar. Esto ya estaba documentado en `decisiones-tecnicas-pdf.md` §3.
+- **`PdfExportModal.tsx`**: construye `PdfSimulationData` desde `snapshot.simA` + `plan.horizonMonths` + `plan.mode` + `plan.inflationPct`. Falla con mensaje claro si `simA` es null.
+- **`ExportBar.tsx`**: botón "Generar plan personal de inversión" con `disabled={!hasSim}` + tooltip dinámico.
+- **`scripts/generate-pdf-samples.ts`**: corre una simulación block-bootstrap (1000 paths, plan de muestra Pocho/longevity/240m) UNA VEZ y la reusa en los 4 locales. Tiempo total: ~3s para los 4 PDFs.
+
+### i18n — `pdf.projections.*`
+
+Agregadas keys en los 4 locales:
+- `title`, `subtitle`, `modeNote.{nominal,real}`, `legend.{median,bands,contributions}`, `years`, `howToRead.{title,body}`, `tailRisk.{title,metric,row.{p95,cvar95,median,p5,cvar5},footnote}`, `narrative`.
+- ES y EN finales, calidad cliente.
+- FR y DE como borrador con prefijo `[BROUILLON]` / `[ENTWURF]` en cada string para señalar visualmente que requiere revisión nativa antes de entrega. El `draftWatermark` global en portada ya marca el documento entero como borrador.
+
+### Verificación
+
+- `npm test` → **330/330** (309 previos + 21 nuevos del helper).
+- `npm run build` → limpio en ~46s. Bundle inicial 1099 KB (vs 1103 KB previo, dentro de variación), chunk lazy `download-*.js` 1883 KB (+16 KB por sección E + helpers).
+- `npm run pdf:samples` → 4 PDFs regenerados en ~3s. ES/EN ~18.9 KB, FR/DE ~20.2 KB (suben ~1 KB respecto al skeleton previo por la sección E completa).
+- `npm run pdf:samples:verify` → round-trip metadata OK en los 4 locales.
+- Sanity scripts (`npm run sanity`, `npm run sanity:views`) NO re-corridos — no se tocó motor (bootstrap, flows, métricas, views). Sí se corrieron al inicio de la sesión: 5/5 verdes + 14 presets verdes. Quedan como verificación al merguear a `main`.
+
+### Lo que NO se tocó
+
+- Motor del planner (bootstrap, flows, metrics, views) — sin cambios.
+- State container (`PdfStateContainer`) — preservado su contrato actual. La simulación es runtime.
+- Secciones C, D, F, G, H, I, J, K, L del PDF — siguen pendientes para sesiones futuras.
+- E4 (drawdowns esperados + tiempo recuperación) y E5 (lenguaje de ajuste Kitces) del dossier — postpuestos. La sección E entregada cubre E1, E2, E3 + caja narrativa de la adenda 10.1.
+
+### Pipeline (siguientes sesiones, orden propuesto por Pocho)
+
+Inmediato (post-compra dominio):
+
+1. **Compra del dominio `mawm-lab.com`** — Pocho ejecuta. Bloqueante para auth.
+2. **Configuración Cloudflare Access** — frente al hosting GH Pages, política con emails autorizados.
+
+Implementación PDF (independiente del dominio):
+
+3. **D4 — Comparativo A vs B con fan chart paralelo** — el dossier coloca el comparativo en D4 y Pocho confirmó que en algún lugar tiene que estar. Próxima sesión PDF natural después de E.
+4. **Importación de PDF (drag & drop)** → `extractStateFromPdf` → rehidratación del store con confirmación visual.
+5. **8 secciones restantes** (C, D, F, G, H, I, J, K, L) con datos reales del store.
+6. **Disclaimer EN/FR/DE** (ES ya redactado en dossier 9.6).
+7. **Logo Mercantil AWM** + paleta + tipografía corporativa (pendientes Pocho).
+
+Auxiliares:
+
+8. **Actualizar instructivo del asesor** (el que tiene gifs) — incorporar uso del nuevo flujo "Generar plan personal de inversión", sección E con tail risk + CVaR, comparativo A vs B en D4 cuando exista. Pocho lo pidió explícitamente para el pipeline.
+
+Mucho más adelante (frente nuevo, fuera del planner):
+
+9. **Problema de "single lines" en Mercantil** — Pocho lo levantó como frente cuantitativo a abrir post-MVP del planner. Pendiente conversación con Pocho para definir alcance y decidir si abrir un subproyecto nuevo o integrarlo al planner.
+
+Backlog Fase E:
+
+- Inflación nominal/real en cada corrida (idea Pocho con diferencial histórico vs spread actual como proxy).
+
+### Estado al cierre
+
+- **330/330 tests · build limpio · 4 PDFs de muestra con sección E renderizada · round-trip metadata OK · branch `feature/pdf-cierre`.**
+- La sección E entrega el diferenciador #6 sobre la industria (CVaR/Expected Shortfall a 5/10/20/30 años + meses negativos esperados implícito en la línea de aportes) en lenguaje cliente, con el párrafo modelo "puntos de ajuste" estilo Kitces.
+- Asesor ahora ve un PDF de 3 páginas con datos reales: portada (A) + resumen ejecutivo (B, skeleton) + proyecciones (E, completa). Las 9 secciones restantes siguen pendientes.
+- Pipeline post-E confirmado con Pocho: D4 (comparativo A vs B), instructivo asesor, "single lines" como frente futuro.
+
+---
+
+## 2026-05-06 (continuación) — Instructivo del asesor actualizado a Fase D.3
+
+Después de cerrar la sección E del PDF, Pocho pidió pasar al instructivo del asesor que vive en `instructivo/`. Estado previo: 7 partes en borrador v1 (1, 4, 4c, 5, 6, 7) más README; 4 partes pendientes (0 portada, 2 mapa, 3 cuatro pasos, 4b seguimiento). Texto general escrito antes de las Fases C.4 (synchronized views) y D (PDF cierre + sección E con CVaR), por lo tanto desactualizado.
+
+### Cambios
+
+**4 partes nuevas creadas (todas borrador v1):**
+
+- `parte-0-portada.md` — portada + índice + carta editorial. 1 screenshot pendiente (logo).
+- `parte-2-mapa-herramienta.md` — recorrido visual zona por zona (9 zonas: header → selector A│B → perfil + sample → flujos → fan chart + simular → stats → views → regímenes → exportar). 4 GIFs + 6 screenshots pendientes.
+- `parte-3-los-cuatro-pasos.md` — manual operativo (configurar → simular → conversar → cerrar). 2 GIFs + 2 screenshots pendientes.
+- `parte-4b-seguimiento-futuro.md` — cadencia de seguimientos por bucket Wealth Way, estructura de la reunión de seguimiento, umbrales de replanificación, memoria de la relación. 1 GIF + 3 screenshots pendientes.
+
+**6 partes existentes actualizadas:**
+
+- `parte-1-por-que-confiar.md` — `147 tests → 330`, bloque nuevo de **14 presets de views** verificados, bloque round-trip metadata del PDF, sección "El entregable de cierre" con mención del diferenciador #6 (CVaR).
+- `parte-4-glosario-nueve-indicadores.md` — anexo nuevo "Métricas de cola disponibles en la sección E del PDF" con CVaR_5 / CVaR_95 + frases modelo + screenshot. Estructura Familia A/B preservada.
+- `parte-4c-manejo-de-views.md` — actualizado a **10 presets** (era 9). Nuevo bloque "Views sincronizados (co-ocurrencia mes a mes)" con preset 10 *Estanflación sincronizada (≥3m en 12m)*, contraste explícito vs el preset compuesto AND, frase modelo, screenshot del builder de view sincronizado.
+- `parte-5-casos-cliente.md` — sección nueva "Cierre de cada caso con el PDF" con tabla por caso (bucket sugerido + versión + comentario), recomendación de carta personalizada, nota sobre PDFs múltiples para Carlos (Liquidez + Longevidad + Legado), GIF de cierre del caso Pablo. Pendiente original (pinear `[X]`) sigue vigente.
+- `parte-6-faq-y-limites.md` — Q&A nuevo sobre el plan personal de inversión (5 preguntas: qué contiene, por qué un PDF por bucket, state container, visores compatibles, FR/DE borrador) y sobre auth (2 preguntas, pendientes refinamiento cuando Cloudflare Access esté activo). Mención "9 presets" → "10 presets".
+- `parte-7-troubleshooting.md` — sección nueva "Problemas con el plan personal de inversión (PDF)" (5 troubleshooting: botón gris, click sin respuesta, PDF en blanco, naming raro, importación rehidratación) y sección "Problemas de acceso (auth)" (2 problemas, pendientes refinamiento).
+
+**Infraestructura:**
+
+- `instructivo/README.md` — completamente reescrito. Índice de estado por parte, cobertura del producto al cierre del 2026-05-06, lista de pendientes por feature (auth, importación drag-drop, D4), receta de captura de assets (ScreenToGif + Greenshot, FPS, encoding, naming convention), inventario consolidado de assets pendientes (~8 GIFs + ~17 screenshots = ~25-30 totales).
+- `scripts/build-instructivo-preview.mjs` — agregado `parte-0-portada.md` al `PARTS_ORDERED`. `npm run preview:instructivo` ahora muestra **11/11 partes rendereadas, 0 pendientes** (antes 7/11 con 4 pendientes silenciosos).
+
+### Verificación
+
+- `npm run preview:instructivo` → ✓ 11 parts rendereadas, 0 pendientes.
+- No se tocó código del producto (motor, components, store, pdf module). Sólo `.md` del instructivo + 1 línea del script de preview.
+
+### Pendientes (capturas de Pocho post-instructivo)
+
+- ~25-30 assets entre GIFs (8) y screenshots (17) — listas detalladas al final de cada parte y consolidadas en `instructivo/README.md`. Stack: ScreenToGif para GIFs, Greenshot para screenshots, Inkscape/GIMP si requieren post-procesamiento.
+- 4 PDFs sample de los casos cliente (Pablo, Diana, Marta, Carlos) para incluir como anexos del instructivo final.
+- Pinear los valores `[X]` del parte-5 corriendo los casos en la herramienta (pendiente preexistente).
+- Logo Mercantil AWM hi-res (pendiente Pocho).
+- Revisión editorial final por asesor senior antes de build con Pandoc.
+
+### Estado al cierre (continuación)
+
+- **Instructivo en borrador v1 completo** — 11 partes redactadas, motor del producto sin cambios, 0 pendientes silenciosos en el preview HTML.
+- Cuando Pocho capture los assets siguiendo las instrucciones consolidadas en `instructivo/README.md`, el instructivo queda listo para build con Pandoc → PDF de capacitación + ficha de consulta rápida del equipo comercial.
+
 

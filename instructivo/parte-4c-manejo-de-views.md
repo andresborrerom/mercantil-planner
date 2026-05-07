@@ -22,9 +22,9 @@ Para el cliente, los views permiten tres tipos de conversación que antes eran d
 
 Esto es importante transmitirlo al cliente antes de mostrar cualquier view. La honestidad metodológica protege la relación: si el view se materializa, el cliente vio las consecuencias; si no se materializa, nunca se lo presentó como promesa.
 
-## Los nueve presets built-in
+## Los diez presets built-in
 
-La herramienta viene con nueve views pre-configurados, agrupados en dos bloques: cuatro sobre tasas, cinco sobre el comportamiento del portafolio.
+La herramienta viene con diez views pre-configurados, agrupados en tres bloques: cuatro sobre tasas, cinco sobre el comportamiento del portafolio, y uno *synchronized* — el preset Fase C.4 que captura co-ocurrencia mensual de dos shocks simultáneos.
 
 ### Views sobre tasas (yield TNX, 10 años)
 
@@ -121,6 +121,22 @@ Estos cinco views se evalúan sobre el retorno acumulado del **portafolio A** (e
 **Cuándo usarlo:** el reflejo del anterior. **Escenario desfavorable pero realista**, no catastrófico. Sirve para anclar expectativas: un año o dos en el tercil inferior es parte de lo esperado.
 
 **Frase al cliente:** *"Si las cosas salen mal — no catastróficamente, simplemente en el tercio inferior de lo posible — el portafolio estaría en USD Y a dos años. Es incómodo, pero es parte del rango esperado. El plan debe sostenerse incluso en ese escenario."*
+
+### Views sincronizados (co-ocurrencia mes a mes)
+
+A diferencia de los views compuestos AND/OR — que exigen que dos predicados se cumplan **alguna vez** dentro de la ventana — los **views sincronizados** exigen que ambos predicados se cumplan **simultáneamente**, en el mismo mes, durante un mínimo de meses dentro de la ventana. Esta diferencia metodológica importa porque la estanflación, el risk-off coordinado o el goldilocks sostenido son fenómenos de **co-movimiento mensual**, no de coincidencias dispersas en el año.
+
+#### 10. Estanflación sincronizada (≥3m en 12m)
+
+**Condición:** El portafolio A cae (retorno mensual negativo) Y el yield TNX sube (Δyield positivo) **en el mismo mes**, durante al menos 3 meses dentro de los próximos 12. La sincronía es el corazón del view: estanflación real implica equity y rates moviéndose en direcciones perversas a la vez, no en momentos distintos.
+
+**Diferencia con el preset *Estanflación (12m)***: el preset compuesto AND captura escenarios donde *en algún momento* del año el portafolio cae más de un threshold Y *en algún otro momento* las tasas suben — pueden ser meses distintos. Su probabilidad típica en un Balanceado es 8-12%. El preset sincronizado captura sólo escenarios donde los dos shocks ocurren mes a mes simultáneamente durante un mínimo de tres meses — su probabilidad típica es 1-3%, mucho menor pero más fiel al patrón histórico de estanflación real (1974, 1979-1982).
+
+**Cuándo usarlo:** Cliente preocupado por estanflación o por la combinación equity-down + rates-up que rompe la diversificación clásica RV/RF. El preset compuesto AND está disponible en el tab *Escenario combinado*; el preset sincronizado está en el tab *Presets* dentro del grupo *Sincronizados*.
+
+**Frase al cliente:** *"Una estanflación clásica no es 'caen las acciones en algún mes y suben las tasas en otro' — es 'caen las acciones y suben las tasas a la vez, durante varios meses'. La probabilidad de que eso ocurra en los próximos 12 meses, según nuestro modelo, es del X% — mucho más baja que cualquier shock individual, pero cuando ocurre rompe la diversificación tradicional. Veamos qué le pasa a su portafolio en ese subconjunto."*
+
+![Builder del tab Escenario combinado con combinator Sincronizado (mes a mes) activo: inputs de ventana 12 meses + meses mínimos sincronizados 3, y dos condiciones — Portafolio A↓ y Tasa 10 años↑ — con el botón Evaluar sincronizado](assets/parte-4c-01-sync-builder.png)
 
 ## Análisis asimétrico: matched vs unmatched vs base
 

@@ -30,6 +30,37 @@
       "actions": "Next Steps",
       "nextReview": "Next Review"
     },
+    "projections": {
+      "title": "Projections",
+      "subtitle": "Projected wealth trajectory of Portfolio A over {{years}} years, with uncertainty bands built from 5,000 historical scenarios.",
+      "modeNote": {
+        "nominal": "Values in nominal USD (no inflation adjustment). To view them in today's USD, run the simulation in \"real\" mode.",
+        "real": "Values in real USD (deflated to today's USD using {{inflation}}% annual inflation)."
+      },
+      "legend": {
+        "median": "Portfolio A median",
+        "bands": "P5–P95 / P10–P90 / P25–P75 bands",
+        "contributions": "Net contributed capital"
+      },
+      "years": "years",
+      "howToRead": {
+        "title": "How to read this chart",
+        "body": "The solid line is the central scenario (median). The bands represent the range of uncertainty: the darkest one captures the middle half of scenarios (P25–P75); the lighter ones reach to the 5th and 95th percentiles. The dashed grey line is net contributed capital (deposits minus withdrawals) — when the median crosses below it, adverse scenarios are eroding the client's own capital."
+      },
+      "tailRisk": {
+        "title": "Tail risk by horizon",
+        "metric": "Metric",
+        "row": {
+          "p95": "P95 (favorable scenario)",
+          "cvar95": "CVaR 95 (upper tail)",
+          "median": "Median (central scenario)",
+          "p5": "P5 (adverse scenario)",
+          "cvar5": "CVaR 5 (lower tail)"
+        },
+        "footnote": "P5 and P95 mark where the tail starts; CVaR (Expected Shortfall) tells you how deep it is on average. The industry shows the percentile; Mercantil delivers both."
+      },
+      "narrative": "Your plan has a 90% probability of ending between {{lowBound}} and {{highBound}} at {{yearsHorizon}} years. In the worst 5% of scenarios, the average outcome is {{cvarLow}} (≈ −{{deltaPct}} below the central scenario)."
+    },
     "footer": {
       "page": "Page",
       "of": "of",

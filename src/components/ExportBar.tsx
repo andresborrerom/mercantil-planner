@@ -119,8 +119,13 @@ export default function ExportBar() {
         <div className="flex gap-2 flex-wrap">
           <button
             onClick={() => setPdfModalOpen(true)}
-            className="mp-btn-primary text-xs"
-            title="Generar entregable de cierre — PDF profesional con estado embebido"
+            disabled={!hasSim}
+            className="mp-btn-primary text-xs disabled:opacity-50 disabled:cursor-not-allowed"
+            title={
+              hasSim
+                ? 'Generar entregable de cierre — PDF profesional con estado embebido'
+                : 'Ejecute primero una simulación'
+            }
           >
             📄 Generar plan personal de inversión
           </button>

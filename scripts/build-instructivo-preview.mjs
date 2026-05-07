@@ -25,6 +25,7 @@ const OUTPUT = join(INSTRUCTIVO_DIR, '_preview.html');
 // silenciosamente (se listan en el TOC con tag "pendiente" al final).
 const PARTS_ORDERED = [
   { file: 'README.md', title: 'Índice y convenciones' },
+  { file: 'parte-0-portada.md', title: 'Parte 0 — Portada y carta editorial' },
   { file: 'parte-1-por-que-confiar.md', title: 'Parte 1 — Por qué confiar' },
   { file: 'parte-2-mapa-herramienta.md', title: 'Parte 2 — Mapa de la herramienta' },
   { file: 'parte-3-los-cuatro-pasos.md', title: 'Parte 3 — Los cuatro pasos' },
@@ -246,6 +247,23 @@ const html = `<!DOCTYPE html>
   hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
   a { color: var(--orange); }
   strong { color: var(--ink); }
+  img {
+    max-width: 100%;
+    height: auto;
+    display: block;
+    margin: 1.2em auto;
+    border: 1px solid var(--line);
+    border-radius: 4px;
+  }
+  /* Caption en cursiva debajo de la imagen (markdown lo renderea como em dentro de p) */
+  img + em, p > em:only-child {
+    display: block;
+    text-align: center;
+    color: var(--slate);
+    font-size: 13px;
+    margin-top: -0.4em;
+    margin-bottom: 1.6em;
+  }
 </style>
 </head>
 <body>

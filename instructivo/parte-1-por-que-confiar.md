@@ -22,9 +22,11 @@ El motor de simulación preserva todas estas dinámicas de forma natural, porque
 
 ## Qué se verifica antes de liberar cada versión
 
-- **147 pruebas automáticas** sobre la matemática del motor: cálculo de rentabilidad anualizada, TIR del cliente, drawdown máximo, probabilidad de ruina, aplicación de flujos de aporte y retiro, regla de inflación para planes reales. Todas deben pasar antes de liberar.
+- **330 pruebas automáticas** sobre la matemática del motor y el módulo de cierre: cálculo de rentabilidad anualizada, TIR del cliente, drawdown máximo, probabilidad de ruina, aplicación de flujos de aporte y retiro, regla de inflación para planes reales, métricas de cola (CVaR / Expected Shortfall a horizontes 5/10/20/30 años), serializador del PDF de cierre, integridad del state container embebido. Todas deben pasar antes de liberar.
 - **5 verificaciones de integridad del motor de simulación**: que dos corridas con la misma semilla produzcan resultados idénticos, que la rentabilidad mediana de un portafolio 100% S&P 500 converja al histórico realizado del índice, que una simulación completa de cinco mil caminos por treinta años termine en menos de quince segundos, que los caminos de renta fija no violen las cotas técnicas del modelo, y que el modelo de yields no produzca datos corruptos.
+- **14 presets de views verificados** automáticamente sobre el motor — nueve de un solo predicado, cuatro compuestos AND/OR, y uno *synchronized* (estanflación SPY↓ Y TNX↑ co-ocurriendo mes a mes). Cada uno se evalúa en un caso de prueba representativo y reporta su probabilidad empírica.
 - **Validación cruzada con Excel** del cálculo de TIR (XIRR), a cuatro decimales de precisión.
+- **Round-trip metadata del PDF**: el state JSON embebido en el documento se extrae intacto, preservando floats, caracteres acentuados y los cuatro idiomas. Verificado automáticamente en cada cierre de versión.
 
 ## Qué NO es esta herramienta
 
@@ -34,6 +36,14 @@ Para ser honestos con el cliente, es igual de importante decir qué **no** prome
 - **No modela cambios regulatorios** ni modificaciones del régimen tributario.
 - **No descuenta costos de transacción ni comisiones de gestión.** Los resultados son brutos; el asesor debe explicar al cliente cómo descontar el impacto de las comisiones sobre el retorno esperado.
 - **No reemplaza el juicio del asesor.** La herramienta cuantifica las consecuencias de las decisiones que el asesor y el cliente toman juntos — no decide por ellos.
+
+## El entregable de cierre — qué recibe el cliente
+
+Al final de cada reunión, el asesor genera el **plan personal de inversión** del cliente: un PDF profesional que documenta las decisiones tomadas, las métricas proyectadas y la metodología detrás. El documento es bilingüe (ES/EN producción, FR/DE como borrador hasta revisión nativa) y se entrega con el naming convention `cliente-bucket.pdf` — un PDF por bucket Wealth Way (Liquidez / Longevidad / Legado).
+
+El PDF lleva embebido en su metadata el **state JSON completo** de la sesión: portafolios, reglas de flujo, ventana, parámetros del bootstrap, idioma. En sesiones futuras, importar el mismo PDF rehidrata exactamente el estado — la herramienta vuelve a la configuración que produjo ese documento. Es la forma de mantener continuidad reunión tras reunión sin re-discutir cada parámetro.
+
+> **Diferenciador #6 sobre la industria top-tier**: la sección E del PDF (Proyecciones) reporta no sólo los percentiles centrales (P5–P95), sino también el **CVaR / Expected Shortfall** a 5/10/20/30 años — el promedio condicional de los escenarios fuera de las colas. La industria muestra el percentil; Mercantil entrega ambos. Es el lenguaje que conecta el riesgo de cola con la decisión del cliente: el percentil dice *dónde* empieza la cola; el CVaR dice *qué tan profunda* es en promedio.
 
 ## Una frase para cerrar con el cliente
 

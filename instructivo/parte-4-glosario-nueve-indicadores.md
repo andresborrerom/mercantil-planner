@@ -101,3 +101,31 @@ Los indicadores se agrupan en dos familias. La primera responde si el plan llega
 **En seguimiento:** Si el cliente tuvo un mal año y pregunta *"¿qué tan malo fue?"*, comparar con el peor rolling 12m proyectado pone el resultado en perspectiva: *"Su peor año móvil fue -8%. El peor año posible según el plan era -15%. Dentro del rango."*
 
 **Frase al cliente:** *"En el peor año móvil que puede esperar, su portafolio puede caer hasta X%. Es el escenario 'el peor año que me puede tocar vivir'. Si eso le genera incomodidad, ajustamos el perfil ahora, no durante la crisis."*
+
+---
+
+## Anexo — Métricas de cola disponibles en la sección E del PDF
+
+Las nueve métricas anteriores viven en el **panel de stats** de la herramienta y son las que el asesor lee durante la reunión. Adicional a ellas, el motor calcula dos métricas de cola que **no aparecen en el panel de stats** pero que el cliente recibe en la sección E (Proyecciones) del PDF de cierre. Vale la pena que el asesor las conozca para responder preguntas que pueda hacer el cliente al leer el documento en su casa.
+
+### CVaR_5 (Conditional Value at Risk al 5%)
+
+**Qué mide:** El **promedio del valor patrimonial** del cliente en los escenarios que terminan **debajo del percentil 5**, evaluado a horizontes de 5, 10, 20 y 30 años (filtrado al horizonte del plan). Mientras el P5 dice *"dónde empieza la cola izquierda"*, el CVaR_5 dice *"qué tan profunda es en promedio"*.
+
+**Cuándo importa:** Cuando el cliente pregunta *"y si el escenario es muy malo, ¿qué tan malo es?"*. La respuesta honesta no es el P5 (que es el techo de la cola, no su media), sino el CVaR_5. Para un plan a 20 años, el P5 puede mostrar USD 800.000 y el CVaR_5 USD 600.000 — la diferencia entre *"el peor 5% empieza acá"* y *"el peor 5% en promedio termina acá"*.
+
+**Frase al cliente:** *"En el 5% de escenarios menos favorables, su capital final estaría debajo de USD X (eso es el percentil 5). En esos escenarios, el resultado promedio es USD Y. Para sus efectos prácticos, planee como si el peor caso razonable fuera ese promedio — el percentil sólo le dice dónde empieza la cola, no qué tan profunda es."*
+
+### CVaR_95 (Conditional Value at Risk al 95%)
+
+**Qué mide:** El **promedio del valor patrimonial** en los escenarios que terminan **por encima del percentil 95**. Es el "upside esperado en escenarios excepcionales" — útil para mostrar al cliente el lado positivo del rango de incertidumbre con la misma metodología que el lado negativo.
+
+**Cuándo importa:** Conversaciones de planeación de legado o de capital máximo. El cliente que pregunta *"y si todo me sale bien, ¿hasta dónde puedo llegar?"* recibe una respuesta no inflada — el CVaR_95 es un número honesto, basado en el promedio condicional, no en el escenario más extremo individual.
+
+**Frase al cliente:** *"En el 5% de escenarios más favorables, su capital final estaría por encima de USD X. En esos escenarios excepcionales, el resultado promedio es USD Y. Es el lado bueno del rango — pero contra el cual no recomiendo planear, igual que no recomiendo planear contra el peor extremo individual."*
+
+### Por qué estas dos métricas son un diferenciador
+
+La industria top-tier (Vanguard PAS, UBS Wealth Way, JPM Private Bank, Schwab CMA) reporta probabilidad de éxito o percentiles centrales, pero raramente entrega el CVaR / Expected Shortfall al cliente final. Es una métrica que Basel III exige a bancos institucionales y que la academia (Cogneau-Zakamouline 2013, entre otros) recomienda para wealth retail, pero que la práctica comercial todavía no estandarizó. El PDF de cierre de Mercantil entrega la tríada completa — percentiles centrales, CVaR de colas, y meses negativos esperados al año — en lenguaje cliente. Es un punto que el asesor puede mencionar explícitamente como rigor metodológico diferenciado.
+
+> **Asset pendiente — captura manual.** La sección E del PDF de cierre (Proyecciones) muestra la tabla *"Riesgo de cola por horizonte"* con las cinco filas (P95, CVaR_95, Mediana, P5, CVaR_5) y las columnas 5/10/20/30 años (recortadas según el horizonte del plan). Para incluir el screenshot acá: abrir `research/samples/pocho-longevity.es.pdf` con Adobe Reader o el visor de Edge, navegar a la página 3 ("Proyecciones"), capturar la tabla con Greenshot y guardar como `instructivo/assets/parte-4-anexo-cvar.png`. Después editar este archivo para reemplazar este aviso por `![Tabla de riesgo de cola por horizonte en la sección E del PDF de cierre, mostrando P95, CVaR_95, Mediana, P5 y CVaR_5 a 5/10/20 años](assets/parte-4-anexo-cvar.png)`.

@@ -30,6 +30,37 @@
       "actions": "Nächste Schritte",
       "nextReview": "Nächste Überprüfung"
     },
+    "projections": {
+      "title": "Projektionen",
+      "subtitle": "[ENTWURF] Projizierter Vermögensverlauf von Portfolio A über {{years}} Jahre, mit Unsicherheitsbändern aus 5.000 historischen Szenarien.",
+      "modeNote": {
+        "nominal": "[ENTWURF] Werte in nominalen USD (ohne Inflationsanpassung). Für heutige USD führen Sie die Simulation im «realen» Modus aus.",
+        "real": "[ENTWURF] Werte in realen USD (auf heutige USD deflationiert mit jährlicher Inflation von {{inflation}}%)."
+      },
+      "legend": {
+        "median": "[ENTWURF] Median Portfolio A",
+        "bands": "[ENTWURF] Bänder P5–P95 / P10–P90 / P25–P75",
+        "contributions": "[ENTWURF] Netto eingebrachtes Kapital"
+      },
+      "years": "Jahre",
+      "howToRead": {
+        "title": "[ENTWURF] Wie dieses Diagramm zu lesen ist",
+        "body": "[ENTWURF] Die durchgezogene Linie ist das zentrale Szenario (Median). Die Bänder zeigen den Unsicherheitsbereich: das dunkelste umfasst die mittlere Hälfte der Szenarien (P25–P75), die helleren reichen bis zu den Perzentilen 5 und 95. Die gestrichelte graue Linie ist das netto eingebrachte Kapital (Einlagen minus Entnahmen) — wenn der Median darunter fällt, gefährden ungünstige Szenarien das Eigenkapital."
+      },
+      "tailRisk": {
+        "title": "[ENTWURF] Tail-Risiko nach Horizont",
+        "metric": "[ENTWURF] Kennzahl",
+        "row": {
+          "p95": "[ENTWURF] P95 (günstiges Szenario)",
+          "cvar95": "[ENTWURF] CVaR 95 (oberer Tail)",
+          "median": "[ENTWURF] Median (zentrales Szenario)",
+          "p5": "[ENTWURF] P5 (ungünstiges Szenario)",
+          "cvar5": "[ENTWURF] CVaR 5 (unterer Tail)"
+        },
+        "footnote": "[ENTWURF] P5 und P95 markieren, wo der Tail beginnt; CVaR (Expected Shortfall) zeigt, wie tief er im Durchschnitt ist. Die Branche zeigt das Perzentil; Mercantil liefert beide."
+      },
+      "narrative": "[ENTWURF] Ihr Plan hat eine Wahrscheinlichkeit von 90%, zwischen {{lowBound}} und {{highBound}} bei {{yearsHorizon}} Jahren zu enden. In den 5% ungünstigsten Szenarien beträgt das durchschnittliche Ergebnis {{cvarLow}} (≈ −{{deltaPct}} unter dem zentralen Szenario)."
+    },
     "footer": {
       "page": "Seite",
       "of": "von",

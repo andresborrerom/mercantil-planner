@@ -30,6 +30,37 @@
       "actions": "Prochaines étapes",
       "nextReview": "Prochaine révision"
     },
+    "projections": {
+      "title": "Projections",
+      "subtitle": "[BROUILLON] Trajectoire patrimoniale projetée du Portefeuille A sur {{years}} ans, avec bandes d'incertitude construites à partir de 5 000 scénarios historiques.",
+      "modeNote": {
+        "nominal": "[BROUILLON] Valeurs en USD nominaux (sans ajustement pour inflation). Pour les voir en USD d'aujourd'hui, exécutez la simulation en mode «réel».",
+        "real": "[BROUILLON] Valeurs en USD réels (déflatés en USD d'aujourd'hui avec une inflation annuelle de {{inflation}}%)."
+      },
+      "legend": {
+        "median": "[BROUILLON] Médiane du Portefeuille A",
+        "bands": "[BROUILLON] Bandes P5–P95 / P10–P90 / P25–P75",
+        "contributions": "[BROUILLON] Capital net apporté"
+      },
+      "years": "ans",
+      "howToRead": {
+        "title": "[BROUILLON] Comment lire ce graphique",
+        "body": "[BROUILLON] La ligne continue est le scénario central (médiane). Les bandes représentent la plage d'incertitude : la plus foncée concentre la moitié centrale des scénarios (P25–P75); les plus claires atteignent les percentiles 5 et 95. La ligne pointillée grise est le capital net apporté (apports moins retraits) — lorsque la médiane passe en dessous, les scénarios défavorables compromettent le capital propre."
+      },
+      "tailRisk": {
+        "title": "[BROUILLON] Risque de queue par horizon",
+        "metric": "[BROUILLON] Métrique",
+        "row": {
+          "p95": "[BROUILLON] P95 (scénario favorable)",
+          "cvar95": "[BROUILLON] CVaR 95 (queue haute)",
+          "median": "[BROUILLON] Médiane (scénario central)",
+          "p5": "[BROUILLON] P5 (scénario défavorable)",
+          "cvar5": "[BROUILLON] CVaR 5 (queue basse)"
+        },
+        "footnote": "[BROUILLON] P5 et P95 indiquent où commence la queue ; le CVaR (Expected Shortfall) indique sa profondeur moyenne. L'industrie montre le percentile ; Mercantil livre les deux."
+      },
+      "narrative": "[BROUILLON] Votre plan a une probabilité de 90% de se terminer entre {{lowBound}} et {{highBound}} à {{yearsHorizon}} ans. Dans les 5% de scénarios les moins favorables, le résultat moyen est {{cvarLow}} (≈ −{{deltaPct}} sous le scénario central)."
+    },
     "footer": {
       "page": "Page",
       "of": "sur",

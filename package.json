@@ -22,7 +22,11 @@
     "test:e2e:headed": "playwright test --headed",
     "pdf:samples": "tsx --tsconfig tsconfig.app.json scripts/generate-pdf-samples.ts",
     "pdf:samples:verify": "tsx --tsconfig tsconfig.app.json scripts/verify-pdf-samples.ts",
-    "docs:viewer": "node scripts/build-doc-viewer.mjs"
+    "docs:viewer": "node scripts/build-doc-viewer.mjs",
+    "capture:instructivo": "tsx scripts/capture-instructivo.ts",
+    "instructivo:build": "node scripts/build-instructivo.mjs",
+    "instructivo:build:dist": "node scripts/build-instructivo.mjs --out=dist/instructivo",
+    "postbuild": "node scripts/build-instructivo.mjs --out=dist/instructivo"
   },
   "dependencies": {
     "@react-pdf/renderer": "^4.5.1",

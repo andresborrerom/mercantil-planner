@@ -68,7 +68,39 @@ Porque el Max Drawdown es una métrica del **manager**, no del cliente. Mide la 
 
 ### ¿Qué es un "view" en la herramienta?
 
-Un view es una hipótesis sobre el mercado — *"las tasas suben 100 pbs en 12 meses"*, *"el portafolio cae más de 20%"*, *"el mercado se comporta como el tercio superior histórico"*. La herramienta toma esa hipótesis, identifica cuántos de los cinco mil escenarios simulados la cumplen (→ probabilidad empírica del view) y recalcula las métricas sobre ese subconjunto (→ impacto esperado si el view se materializa). Ver Parte 4c del instructivo para el detalle de los nueve presets disponibles y cómo usarlos en conversación.
+Un view es una hipótesis sobre el mercado — *"las tasas suben 100 pbs en 12 meses"*, *"el portafolio cae más de 20%"*, *"el mercado se comporta como el tercio superior histórico"*. La herramienta toma esa hipótesis, identifica cuántos de los cinco mil escenarios simulados la cumplen (→ probabilidad empírica del view) y recalcula las métricas sobre ese subconjunto (→ impacto esperado si el view se materializa). Ver Parte 4c del instructivo para el detalle de los diez presets disponibles y cómo usarlos en conversación.
+
+## Sobre el plan personal de inversión (PDF de cierre)
+
+### ¿Qué es exactamente el PDF que entrego al cliente?
+
+Es el documento profesional que cierra la reunión. Contiene la portada con los datos del cliente y del asesor, un resumen ejecutivo, la sección de proyecciones con el fan chart y la tabla de tail risk a 5/10/20/30 años, y — según la versión — secciones adicionales sobre el portafolio recomendado, stress tests por régimen histórico, sensibilidades, costes, acuerdo de seguimiento, glosario, metodología y disclaimers. La versión Completa tiene 18-25 páginas; la Ejecutiva 6-8 páginas. Ambas se generan del mismo state JSON.
+
+### ¿Por qué hay un PDF separado por bucket Wealth Way?
+
+Porque cada bucket (Liquidez / Longevidad / Legado) tiene un objetivo distinto, un horizonte distinto y un perfil de riesgo razonable distinto. Hacer un PDF "consolidado" con los tres mezclados produce un documento confuso para el cliente y diluye la conversación. La convención adoptada (un bucket por estudio) está alineada con el framework UBS Wealth Way y es la que mejor sostiene la conversación tanto en la reunión inicial como en seguimientos.
+
+### ¿Qué hace el "state container" embebido en la metadata?
+
+El PDF lleva embebido en su metadata el JSON con el estado completo de la sesión: portafolios, reglas, ventana, parámetros del bootstrap. En sesiones futuras, importar el PDF (drag-and-drop sobre la herramienta — feature en desarrollo al cierre del 2026-05-06) rehidrata ese estado: la herramienta vuelve exactamente a la configuración que produjo el documento. Es lo que permite continuidad entre reuniones sin re-configurar manualmente. Mientras la importación esté en desarrollo, la alternativa es copiar el JSON al clipboard con el botón *Copiar config* y pegarlo en la siguiente reunión.
+
+### ¿El PDF se ve igual en cualquier visor?
+
+El documento usa fuentes embebidas (Times-Roman + Helvetica) y cumple el estándar PDF/A en lo esencial. Adobe Reader, Preview de macOS, el visor built-in de Chrome y Edge lo abren idénticamente. El state JSON embebido en la metadata sobrevive a esos visores; algunos compresores web agresivos (servicios online de "reducir tamaño") pueden eliminar metadata custom — no enviar el PDF por servicios de compresión antes de archivar.
+
+### ¿Por qué FR y DE están marcados como borrador?
+
+La redacción del PDF en español e inglés está revisada y se considera de calidad cliente final. Las versiones en francés y alemán están traducidas pero todavía no han sido revisadas por hablantes nativos. El PDF lo señala explícitamente con un banner en la portada (*"BORRADOR — révision par locuteur natif requise"* / *"ENTWURF — muttersprachliche Überprüfung erforderlich"*) para que el asesor sepa que esa versión no debería usarse con cliente final hasta la revisión. El estado se actualizará en futuras versiones del instructivo.
+
+## Sobre el acceso a la herramienta (auth)
+
+### ¿Quién puede abrir la herramienta?
+
+Por ahora, cualquiera con acceso a la URL pública del despliegue. En la fase próxima — bloqueada por la compra del dominio `mawm-lab.com` y la configuración de Cloudflare Access — el acceso será restringido a una lista de emails autorizados de asesores internos de Mercantil AWM. Los clientes finales **no acceden directamente a la herramienta**; consumen los resultados vía el PDF de cierre que el asesor genera y le entrega.
+
+### ¿Qué pasa cuando el auth esté activo?
+
+El asesor verá una pantalla de login email + OTP la primera vez que abra la herramienta. Después del primer login exitoso, la sesión queda activa por un período razonable (configurable en la consola de Cloudflare Access). Si el asesor cambia de máquina o de navegador, debe volver a hacer login. Esta sección se actualizará con detalles operativos cuando el feature esté en producción.
 
 ## Honestidad metodológica
 

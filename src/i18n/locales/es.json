@@ -30,6 +30,37 @@
       "actions": "Próximos pasos",
       "nextReview": "Próxima revisión"
     },
+    "projections": {
+      "title": "Proyecciones",
+      "subtitle": "Trayectoria patrimonial proyectada del Portafolio A a {{years}} años, con bandas de incertidumbre construidas a partir de 5 000 escenarios históricos.",
+      "modeNote": {
+        "nominal": "Valores en USD nominales (sin ajuste por inflación). Para verlos en USD de hoy, ejecute la simulación en modo «real».",
+        "real": "Valores en USD reales (deflactados a USD de hoy con inflación anual de {{inflation}}%)."
+      },
+      "legend": {
+        "median": "Mediana del Portafolio A",
+        "bands": "Bandas P5–P95 / P10–P90 / P25–P75",
+        "contributions": "Capital aportado neto"
+      },
+      "years": "años",
+      "howToRead": {
+        "title": "Cómo leer este gráfico",
+        "body": "La línea sólida es el escenario central (mediana). Las bandas representan el rango de incertidumbre: la más oscura concentra la mitad central de los escenarios (P25–P75), las claras llegan hasta los percentiles 5 y 95. La línea punteada gris es el capital aportado neto (aportes menos retiros) — cuando la mediana cruza por debajo, los escenarios desfavorables están comprometiendo capital propio."
+      },
+      "tailRisk": {
+        "title": "Riesgo de cola por horizonte",
+        "metric": "Métrica",
+        "row": {
+          "p95": "P95 (escenario favorable)",
+          "cvar95": "CVaR 95 (cola alta)",
+          "median": "Mediana (escenario central)",
+          "p5": "P5 (escenario desfavorable)",
+          "cvar5": "CVaR 5 (cola baja)"
+        },
+        "footnote": "Los percentiles P5 y P95 indican dónde empieza la cola; el CVaR (Expected Shortfall) indica qué tan profunda es en promedio. La industria muestra el percentil; Mercantil entrega ambos."
+      },
+      "narrative": "Su plan tiene una probabilidad del 90% de terminar entre {{lowBound}} y {{highBound}} a {{yearsHorizon}} años. En el 5% de escenarios menos favorables, el resultado promedio es {{cvarLow}} (≈ −{{deltaPct}} sobre el escenario central)."
+    },
     "footer": {
       "page": "Página",
       "of": "de",
