@@ -34,9 +34,15 @@ Cinco bloques en orden:
 
 El asesor abre el PDF generado en la reunión previa. Lee al cliente el sessionId del documento (visible en la portada y en el footer de cada página) como ancla del histórico — es el mismo sessionId que aparece embebido en la metadata del PDF y permite rastrear la conversación específica que generó ese plan.
 
-> **Importación drag-and-drop (en desarrollo)**: cuando esté disponible, el asesor arrastra el PDF de la sesión anterior sobre la herramienta y el state se rehidrata automáticamente — portafolios, reglas, ventana, parámetros. Mientras tanto, el flujo manual es: abrir el config JSON guardado por el asesor (ver Parte 3 paso 4.3) y pegarlo en el campo *"Pegar config JSON"* del ExportBar. Reconstruye la sesión exacta.
+#### Rehidratación de la sesión — dos caminos
 
-![Rehidratación manual: pegar JSON en el textarea "Pegar config JSON" → Aplicar → portafolios y plan restaurados](assets/parte-4b-01-rehidratar.gif)
+**Camino primario — drag-and-drop del PDF.** El asesor arrastra el PDF de la sesión anterior sobre la ventana de la herramienta. La herramienta detecta el drop, lee la metadata embebida (portafolios A y B, plan, reglas, ventana, configuración del bootstrap) y rehidrata el state automáticamente. Durante el drag aparece un overlay con la indicación *"Soltá el PDF para rehidratar la sesión"*; al soltar, un toast verde confirma con cliente, bucket y fecha del PDF cargado. El asesor presiona Simular y vuelve a la conversación con la proyección actualizada.
+
+> **Cuándo usar el drag-and-drop**: siempre que tengas el PDF a mano. Es el camino oficial — el PDF ES el state container, no necesitás guardar un JSON separado.
+
+**Camino fallback — pegar JSON.** Si el PDF no está disponible (perdido, corrupto, generado por una versión muy vieja sin metadata) pero sí tenés el JSON de config exportado en su momento (ver Parte 3 paso 4.3), pegalo en el textarea *"Pegar config JSON"* del ExportBar y click *Aplicar*. Reconstruye la sesión exacta.
+
+![Rehidratación manual fallback: pegar JSON en el textarea "Pegar config JSON" → Aplicar → portafolios y plan restaurados](assets/parte-4b-01-rehidratar.gif)
 
 ### 2. Verificar que el capital efectivo esté dentro de la banda proyectada (5-10 min)
 

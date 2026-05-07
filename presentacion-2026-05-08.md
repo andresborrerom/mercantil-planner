@@ -86,18 +86,26 @@ Configurar este caso de cero en vivo. Es el mismo del instructivo Parte 3, así 
 
 ### Bloque 4 — Seguimiento (Marta) (5 min)
 
-**Acción**: demostrar el flujo de re-corrida del plan 6-12 meses después.
+**Acción**: demostrar el flujo de re-corrida del plan 6-12 meses después con **drag-and-drop del PDF** — el "wow" conceptual del producto.
 
-**Pasos:**
-1. Bajar al card "Exportar y compartir".
-2. *"Un asesor puede copiar el config JSON al clipboard y guardarlo. Cuando vuelve a ver al cliente 6 meses después, lo pega de vuelta y re-corre el análisis con el capital actual."*
-3. Click "Copiar config" → mostrar el toast "Copiado ✓".
-4. Pegar el JSON pre-armado de Marta en el textarea (tener uno listo en el clipboard alternativo).
-5. Click Aplicar → muestra el state restaurado.
-6. Editar capital actual (de 500k a 380k — mostrando que la realidad evolucionó vs la proyección).
-7. Re-simular → comparar.
+**Pre-requisito antes de presentar**: tener un PDF de Marta pre-generado a mano (caso Marta-original: capital 500k, retiro 4k mensual real, horizonte 25 años, portafolio A Conservador, B Balanceado). Generalo durante el checklist de 30 min antes y guardalo accesible en el escritorio.
 
-**Riesgo**: si el clipboard no copia (Chromium policy), tener el JSON pegado en un Notepad de backup.
+**Pasos (camino principal — drag-and-drop):**
+1. *"El PDF que el cliente recibe NO es solo un documento de lectura — es también un contenedor del state completo de la sesión. Lo arrastro sobre la herramienta…"*
+2. Arrastrar el PDF de Marta sobre la ventana del navegador.
+3. Aparece el overlay azul *"Soltá el PDF para rehidratar la sesión"*. Soltar.
+4. Toast verde: *"Sesión rehidratada — cliente Marta (longevity). PDF del 2026-XX-XX. Presioná Simular para correr la proyección."*
+5. Mostrar que portafolios A/B + plan + ventana se restauraron exactamente.
+6. Editar capital actual (500k → 380k — la realidad evolucionó respecto a la proyección).
+7. Click Simular → comparar contra la proyección original que el cliente recibió.
+
+**Frase clave**: *"Esto cierra el ciclo. El PDF que generamos para el cliente es también el insumo para la siguiente reunión. No hay JSON sueltos, no hay copy-paste — el documento ES el plan."*
+
+**Fallback si falla el drag-and-drop**: tener un JSON de config en Notepad de respaldo. Pegar en el textarea *"Pegar config JSON"* del ExportBar y click Aplicar. La herramienta lo describe como "camino fallback" en la Parte 4b del instructivo.
+
+**Riesgos específicos:**
+- *Toast de error "PDF sin metadata Mercantil"*: el PDF es de antes de hoy (sin el feature). Tener un PDF generado **hoy** del caso Marta para evitarlo.
+- *Drag-and-drop no responde*: navegador con extensión que intercepta drops, o ventana del navegador no enfocada. Fallback al JSON paste.
 
 ---
 
@@ -193,8 +201,10 @@ Configurar este caso de cero en vivo. Es el mismo del instructivo Parte 3, así 
 
 - [ ] Validar https://andresborrerom.github.io/mercantil-planner/ desde la PC de presentación.
 - [ ] Validar https://andresborrerom.github.io/mercantil-planner/instructivo/ — TOC sticky, drawer en mobile, GIFs cargan.
+- [ ] **Generar PDF de Marta-original** (capital 500k, retiro 4k mensual real, horizonte 25 años, A Conservador, B Balanceado) y guardarlo en el escritorio para el Bloque 4 drag-and-drop.
+- [ ] **Probar drag-and-drop una vez** con ese PDF para confirmar que el toast verde aparece y el state se rehidrata correctamente.
 - [ ] Browser zoom 90%, theme light, console cerrada.
-- [ ] Notepad con JSON Marta pre-armado (para Bloque 4).
-- [ ] Pestaña Adobe Reader / Edge PDF abierta para mostrar el PDF descargado rápido.
+- [ ] Notepad con JSON Marta de respaldo (fallback si el drag-and-drop falla).
+- [ ] Pestaña Adobe Reader / Edge PDF abierta para mostrar el PDF descargado rápido en Bloque 5.
 - [ ] Confirmar audio + pantalla compartida en Zoom/Teams (o el medio que uses).
 - [ ] Cerrar Slack / email / notificaciones.

@@ -2,6 +2,7 @@ import ExportBar from './components/ExportBar';
 import FanChart from './components/FanChart';
 import FlowEditor from './components/FlowEditor';
 import Header from './components/Header';
+import PdfDropZone from './components/PdfDropZone';
 import PortfolioSelector from './components/PortfolioSelector';
 import ProfilePreview from './components/ProfilePreview';
 import RegimesPanel from './components/RegimesPanel';
@@ -19,6 +20,7 @@ function App() {
 
   return (
     <div className="min-h-screen flex flex-col">
+      <PdfDropZone />
       <Header />
 
       <main className="flex-1">
