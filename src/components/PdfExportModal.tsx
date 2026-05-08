@@ -64,6 +64,11 @@ export default function PdfExportModal({ open, onClose }: Props) {
     e.preventDefault();
     setError(null);
     setBusy(true);
+    // Pre-abrir la pestaña de visualización dentro del user gesture; sino el
+    // pop-up blocker mata el window.open al ejecutarse después de los await.
+    // Si el blocker la rechaza igual, viewerWindow queda null y seguimos con
+    // solo descarga (sin error).
+    const viewerWindow = window.open('', '_blank');
     try {
       const formWithNote: PdfFormInputs = {
         ...form,
@@ -91,9 +96,10 @@ export default function PdfExportModal({ open, onClose }: Props) {
         inflationPct: snapshot.plan.inflationPct,
       };
       const { generateAndDownloadPdf } = await import('../pdf/download');
-      await generateAndDownloadPdf(state, simulationData, { filename });
+      await generateAndDownloadPdf(state, simulationData, { filename, viewerWindow });
       onClose();
     } catch (err) {
+      if (viewerWindow && !viewerWindow.closed) viewerWindow.close();
       console.error('[PdfExportModal] generación falló', err);
       setError(err instanceof Error ? err.message : String(err));
     } finally {
